@@ -1,0 +1,18 @@
+.envrc
+.env
+
+# Submission tarball — regenerate with `uv run orbit-play pack`
+submission.tar.gz
+
+# uv / virtualenv
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Worktrees (if any are created by orchestration runs)
+.worktrees/
