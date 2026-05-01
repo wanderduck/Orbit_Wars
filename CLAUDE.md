@@ -35,7 +35,9 @@ kaggle competitions submit orbit-wars -f main.py -m "<message>"
 kaggle competitions submissions orbit-wars
 ```
 
-There is no test suite, linter, or formatter configured. If you add one, document it here.
+Run tests: `uv run pytest -q` (37 tests; geometry/rotation/world combat resolution; uses `hypothesis` for property tests). Mark slow tests with `@pytest.mark.slow` and run via `-m slow`. Lint: `uv run ruff check src tests`. Type-check: `uv run ty check src` (config in `pyproject.toml`).
+
+The Typer CLI: `uv run orbit-play {play,ladder,replay,pack,train,eval} --help`. `pack` produces a submission tarball with a G4 smoke test built in.
 
 ## Submission packaging — important
 
@@ -56,19 +58,32 @@ The submission entry point is `src/main.py:agent(obs)`. It is **stateless** by c
 
 Critical observation/action quirks:
 
-- **`obs` may be a dict OR a namespace.** The current code handles both via `obs.get(k, default) if isinstance(obs, dict) else obs.k`. Preserve that pattern in new code.
-- **Comets are aliased into `obs.planets`.** Filter with `obs.comet_planet_ids` when iterating "real" planets — comets disappear when they leave the board and take their garrisons with them.
-- **Planet rotation is deterministic.** `obs.angular_velocity` plus `obs.initial_planets` lets you predict any orbiting planet's future position; don't aim at *current* coordinates of a moving planet from far away.
-- **Fleet speed scales with fleet size** (`speed = 1 + (max-1) * (log(ships)/log(1000))^1.5`). Splitting a large fleet into many tiny fleets dramatically slows them down.
+- **`obs` may be a dict OR a Struct.** Use `ObservationView.from_raw(obs)` (in `orbit_wars.state`) or the dual-mode pattern. Preserve in new code.
+- **`agent(obs, config=None)` signature trap.** `kaggle_environments.env.run` passes its env-config Struct as the second positional arg. If you write `cfg = config or DEFAULT`, the truthy Struct overrides DEFAULT and `cfg.<attr>` raises AttributeError, gets caught by the boundary `try/except`, and the agent returns `[]` every turn for the entire episode — silently. **Always guard with `isinstance(config, HeuristicConfig)`.** This bug cost hours in v1.0; never repeat it.
+- **Comets are aliased into `obs.planets`.** Filter with `obs.comet_planet_ids` when iterating "real" planets. Comets vanish when they leave the board (taking garrisoned ships with them) — `aim_with_prediction` caps ETA at `len(comet_path) - comet_path_index`; if you bypass the helper, replicate the cap.
+- **Planet rotation: rotate from CURRENT position, not `initial_planets`.** At step N obs, the planet has undergone (N−1) rotations from initial. Agents don't know N. `predict_planet_position(target_now, ang_vel, ETA)` is correct; `predict_planet_position(initial, ang_vel, ETA)` is off by N−1 (constant ~1-unit drift per game). Was an off-by-N bug in v1.2.
+- **Fleets collide with ANY planet on the path, not just sun and target.** Per E1 / E3: "Collides with any planet (path segment comes within the planet's radius). This triggers combat." Use `path_collision_predicted` in `orbit_wars.world` — walks the trajectory turn-by-turn, predicts each non-target planet's position, returns the first interceptor or None. Static-position checks at launch time are insufficient because moving planets sweep into stationary fleets (env phase 6).
+- **Fleet speed scales with fleet size** (`speed = 1 + (max-1) * (log(ships)/log(1000))^1.5`). Splitting a large fleet into many tiny fleets dramatically slows them down. Splitting also costs path-clearance verifications per fleet.
 - The named tuples `Planet`, `Fleet`, plus `CENTER` and `ROTATION_RADIUS_LIMIT` are exported from `kaggle_environments.envs.orbit_wars.orbit_wars`.
 
-The current `agent` is a "nearest-planet sniper" baseline (capture closest unowned planet whenever you have `garrison + 1` ships). Treat it as a placeholder — it ignores the sun, comets, planet rotation, fleet collisions in transit, and 4-player dynamics.
+The current `agent` (v1.4) is a nearest-target sniper with: WorldModel-backed ship sizing (`min_ships_to_own_by` accounts for in-flight enemy fleets and target production), intercept solver for orbiting/comet targets (`aim_with_prediction`), path-clearance check (skip launches that would be intercepted mid-flight by other planets), comet lifetime cap, and `HeuristicConfig` dataclass for tuning. Local performance: 100% vs random + 100% vs sniper baseline (20 seeds each). Untested vs LB-ranked opponents — that's v1.5+ work.
 
 ## Known gaps / be critical
 
-- **`kaggle_environments` is not declared in `pyproject.toml`.** It is required to run any local game and to be importable by `main.py`. If `uv run python -c "import kaggle_environments"` fails, add it (`uv add kaggle-environments`) before debugging further. Do not silently work around the missing import.
-- **`README.md` is explicitly marked as a placeholder.** Don't trust it for current state.
-- `data/`, `models/`, `notebooks/` exist but are empty; no data-pipeline conventions have been set yet.
+- **README.md is a placeholder** — don't treat it as documentation.
+- **No defensive logic yet.** Agent never reinforces threatened planets. This will hurt vs. opponents that actually attack (sniper barely does, but LB-ranked agents will).
+- **No 4-player FFA-aware logic.** Agent treats all non-self planets as targets without considering kingmaker dynamics or alliance-of-convenience patterns.
+- **No multi-source coordination.** Each owned planet picks a target independently; no swarm mission (E6 pattern).
+- **`uv.lock` pins large CUDA/RAPIDS stack** — `uv sync` is slow (~minutes). The agent itself doesn't need GPU; it's there for the v2+ RL scaffold (currently stubs in `src/orbit_wars/rl/`).
+
+## Diagnostics & debugging
+
+When the agent loses or behaves unexpectedly, **diagnose before fixing**. The tools that exist:
+
+- `uv run python -m tools.diagnostic --seeds 0,1,2,3,4 --out docs/iteration_logs/<v>/diag.json` — instruments the agent, logs every launch with target/ships/eta, then walks env.steps to resolve outcome (`captured`, `still-neutral-at-arrival`, `fleet-destroyed-in-transit`, `enemy-defended`, `arrival-after-episode-end`, etc). Outputs JSON + Markdown summary tables.
+- `uv run python -m tools.trace_launch --seed 0 --target-type {static,orbiting,comet}` — picks specific launches and walks env.steps to find the fleet's actual trajectory and where it disappeared. Useful for verifying hypotheses before coding fixes.
+- For reproducible tournaments, set `random.seed(42)` ONCE before the seed loop. `random_agent` and env internals consume Python's global random state; per-seed reseeding gives different results than running 10 seeds straight. (env's own seed via `configuration={'seed': N}` is independent.)
+- **kaggle_environments quirk**: `env.run` calls agent functions via `inspect.signature` — closures with `*args, **kwargs` get called with NO args because the inspector sees 0 required params. Always use a real function with explicit `obs` parameter.
 
 ## Repo layout (only the non-obvious bits)
 

@@ -235,6 +235,8 @@ def path_collision_predicted(
     eta: int,
     *,
     view: ObservationView,
+    comet_paths: dict[int, list[tuple[float, float]]] | None = None,
+    comet_path_indices: dict[int, int] | None = None,
     skip_own: bool = True,
 ) -> Planet | None:
     """Walk the planned fleet trajectory turn-by-turn, predicting other planets' positions
@@ -247,6 +249,14 @@ def path_collision_predicted(
     If ``skip_own`` is True, ignore collisions with the player's own planets — the fleet
     ships are added to that planet's garrison (no loss), which is acceptable. Set False
     to be conservative.
+
+    Position prediction:
+    - Orbiting planets: rotate from CURRENT position by ``t`` rotations (NOT from
+      ``initial_planets`` — that's the off-by-N bug fixed for ``predict_target_position``
+      in v1.3, and it applies here too).
+    - Comets: index into ``comet_paths[planet_id]`` at the appropriate turn (linear
+      trajectories, not orbital). Pass ``comet_paths`` and ``comet_path_indices`` from
+      the WorldModel to enable comet-aware clearance.
     """
     speed = fleet_speed(ships)
     sx = src.x + math.cos(angle) * (src.radius + LAUNCH_CLEARANCE)
@@ -264,11 +274,14 @@ def path_collision_predicted(
             if skip_own and p.owner == view.player:
                 continue
             # Predict p's position at turn t
-            initial = view.initial_by_id(p.id)
-            if initial is not None:
-                px, py = predict_planet_position(initial, view.angular_velocity, t)
+            if comet_paths is not None and p.id in comet_paths:
+                path = comet_paths[p.id]
+                idx_now = (comet_path_indices or {}).get(p.id, 0)
+                idx_at_t = min(idx_now + t, len(path) - 1)
+                px, py = path[idx_at_t]
             else:
-                px, py = p.x, p.y
+                # Rotate from CURRENT position (not initial — off-by-N bug otherwise)
+                px, py = predict_planet_position(p, view.angular_velocity, t)
             d = math.hypot(fx - px, fy - py)
             if d < p.radius + LAUNCH_CLEARANCE:
                 return p

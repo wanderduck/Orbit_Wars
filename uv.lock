@@ -1944,11 +1944,28 @@ wheels = [
 ]
 
 [[package]]
+name = "jupytext"
+version = "1.19.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py" },
+    { name = "mdit-py-plugins" },
+    { name = "nbformat" },
+    { name = "packaging" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/13/a5/80c02f307c8ce863cb33e27daf049315e9d96979e14eead700923b5ec9cc/jupytext-1.19.1.tar.gz", hash = "sha256:82587c07e299173c70ed5e8ec7e75183edf1be289ed518bab49ad0d4e3d5f433", size = 4307829, upload-time = "2026-01-25T21:35:13.276Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/5a/736dd2f4535dbf3bf26523f9158c011389ef88dd06ec2eef67fd744f1c7b/jupytext-1.19.1-py3-none-any.whl", hash = "sha256:d8975035155d034bdfde5c0c37891425314b7ea8d3a6c4b5d18c294348714cd9", size = 170478, upload-time = "2026-01-25T21:35:11.17Z" },
+]
+
+[[package]]
 name = "kaggle"
-version = "2.0.0"
+version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bleach" },
+    { name = "jupytext" },
     { name = "kagglesdk" },
     { name = "packaging" },
     { name = "protobuf" },
@@ -1958,9 +1975,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/14/c7/4e9e7b742b637e32b6afe2b7723e17195627f0bc25c6fffdd7d09fdfe33b/kaggle-2.0.0.tar.gz", hash = "sha256:34cb700cec37273a39ca54f4b18bebc3b6609d08bd03351fc205f9178f79f9ca", size = 136535, upload-time = "2026-02-11T19:46:12.495Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/58/7fb9649dea58946870c19e449d545ae3774f151e4652dc7733f1a5be411b/kaggle-2.1.0.tar.gz", hash = "sha256:cae0c080e7366ce9da5b92f58fe616d9e230df18827573afbb7e3067eb752e64", size = 152757, upload-time = "2026-04-24T16:52:44.423Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0c/b0/868ff7b15389a35fbe49769b383a683ade21deb16565e84b7ad45af976d3/kaggle-2.0.0-py3-none-any.whl", hash = "sha256:91b3f717e529e57dd40c6c44513e25218674636fb1b143031370ad33c5f1a7e2", size = 75462, upload-time = "2026-02-11T19:46:11.488Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/c5/3c390d4603d522296b72554116f86f09370c9f862076d0a404d08d497a58/kaggle-2.1.0-py3-none-any.whl", hash = "sha256:bd120b5689cc8e00a9c1d35c0ead6bde58084a009787b9f5b5414f1d9c67825f", size = 95414, upload-time = "2026-04-24T16:52:43.086Z" },
 ]
 
 [[package]]
@@ -3307,7 +3324,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "jupyterlab", specifier = ">=4.5.5" },
-    { name = "kaggle", specifier = ">=2.0.0" },
+    { name = "kaggle", specifier = ">=2.0.2" },
     { name = "kaggle-environments", specifier = ">=1.28.1" },
     { name = "kagglehub", specifier = ">=1.0.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
