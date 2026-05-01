@@ -70,6 +70,15 @@ class HeuristicConfig:
     # defense on top for a controlled A/B against the deployed v1.5.
     use_hungarian_offense: bool = False
 
+    # ----- Map-control bonus (Phase 2 step 2) -----
+    # When True, greedy planner divides each candidate's distance by a
+    # map-control multiplier so central-board targets are picked first at
+    # equal raw distance: ×1.4 within radius 20 of SUN_CENTER, ×1.2 within
+    # radius 35, ×1.0 otherwise. Approximates mdmahfuzsumon's value-side
+    # multiplier in our distance-sort planner. See spec
+    # 2026-05-01-phase-2-implementation-design.md, step 2.
+    map_control_bonus_enabled: bool = True
+
     # ----- Time budget -----
     soft_act_deadline_fraction: float = 0.82    # E6 — act with 82% of max_time
     heavy_route_planet_limit: int = 32          # E6

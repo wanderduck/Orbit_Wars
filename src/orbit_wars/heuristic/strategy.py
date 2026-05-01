@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from ..geometry import dist, is_static_planet, safe_angle_and_distance
+from ..geometry import SUN_CENTER, dist, is_static_planet, safe_angle_and_distance
 from ..state import ObservationView, Planet
 from ..world import WorldModel, aim_with_prediction, estimate_fleet_eta, path_collision_predicted
 from .config import HeuristicConfig
@@ -165,6 +165,23 @@ def _decide_with_decisions(
     return moves, decisions
 
 
+def _map_control_bonus(x: float, y: float) -> float:
+    """Multiplier for central-board targets (Phase 2 step 2).
+
+    Approximates mdmahfuzsumon's value-side multiplier inside our
+    distance-sort planner: a central planet at distance 20 with bonus 1.4
+    gets sorted as if it were ~14.3 away. Returns 1.0 outside the bands
+    so it's a no-op for peripheral targets.
+    """
+    cx, cy = SUN_CENTER
+    d = dist(x, y, cx, cy)
+    if d < 20.0:
+        return 1.4
+    if d < 35.0:
+        return 1.2
+    return 1.0
+
+
 def _plan_offense_greedy(
     view: ObservationView,
     world: WorldModel,
@@ -180,6 +197,10 @@ def _plan_offense_greedy(
     Doesn't try to globally optimize. This was v1.4's only offense planner —
     retained for A/B testing whether Hungarian (v1.5) actually wins on the
     real Kaggle ladder.
+
+    When ``cfg.map_control_bonus_enabled`` is True (Phase 2 step 2), the sort
+    key divides distance by ``_map_control_bonus(t.x, t.y)`` so central-board
+    targets are picked first at equal raw distance.
     """
     moves: list[list[float | int]] = []
     decisions: list[LaunchDecision] = []
@@ -188,9 +209,15 @@ def _plan_offense_greedy(
         available = int(src.ships) - committed
         if available < cfg.min_launch:
             continue
-        sorted_targets = sorted(
-            target_planets, key=lambda t: dist(src.x, src.y, t.x, t.y),
-        )
+        if cfg.map_control_bonus_enabled:
+            sorted_targets = sorted(
+                target_planets,
+                key=lambda t: dist(src.x, src.y, t.x, t.y) / _map_control_bonus(t.x, t.y),
+            )
+        else:
+            sorted_targets = sorted(
+                target_planets, key=lambda t: dist(src.x, src.y, t.x, t.y),
+            )
         for target in sorted_targets:
             result = _try_launch(src, target, view, world, cfg, available)
             if result is None:
