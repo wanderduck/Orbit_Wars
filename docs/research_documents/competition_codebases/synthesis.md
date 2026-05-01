@@ -3,27 +3,39 @@
 **Date:** 2026-05-01
 **Phase:** 1 (research only, no implementation)
 **Sources:** 6 per-codebase briefs in this directory
-**Author ladder context:** all 6 authors verified against `_research_workspace/leaderboard.csv` (downloaded 2026-05-01 09:44 UTC). Ranks 318-988, scores 616.4-850.9. Top of LB is 1623.1 (Shun_PI). Our v1.5G sits at ~600-655 μ — *middle of this peer cohort, not behind it*. **(See Baseline update below — this number was an early-game underestimate; v1.5G's latest reading is ~800 μ, which materially changes the cohort framing.)**
+**Author ladder context:** all 6 authors verified against `_research_workspace/leaderboard.csv` (downloaded 2026-05-01 09:44 UTC). Ranks 318-988, scores 616.4-850.9. Top of LB is 1623.1 (Shun_PI). Our v1.5G sits at ~600-655 μ — *middle of this peer cohort, not behind it*. **(See Baseline updates below — the original number underestimated the noise band; v1.5G is high-variance with submissions spanning ~650-800 μ. Working median is ~700 μ.)**
 
-## Baseline update — 2026-05-01 (post-publication)
+## Baseline update #1 — 2026-05-01 (mid-day)
 
-After the synthesis above was committed, the user clarified that **v1.5G's latest ladder reading is hovering just under 800 μ — approximately 100 points above the two prior submissions** (which were v1.5-Hungarian variants). Treat the new ~800 baseline as a working number, not a settled truth: the ~100 μ swing across submissions is at the edge of plausible ladder noise.
+After the synthesis above was committed, the user clarified that **v1.5G's latest ladder reading was hovering just under 800 μ — approximately 100 points above the two prior submissions** (which were v1.5-Hungarian variants). Treated the new ~800 baseline as a working number, not a settled truth: the ~100 μ swing across submissions was flagged as at the edge of plausible ladder noise.
 
-**Implications for the rankings in the body above:**
+**Implications taken at the time:**
 
-- **mdmahfuzsumon (796.8) is now roughly at parity with us, not above us.** The "only above-us peer" framing in TL;DR #1 and several per-technique deep dives is wrong.
-- Three of the top-5 ranked techniques (#1 pincer, #2 map-control, #3 aggression scaling) source from mdmahfuzsumon. The red-team's concern #3 (n=1 selection bias) is sharper now — the single source isn't above us at all.
-- The "simpler path-clearance correlates with higher score" finding (TL;DR #2) is weakened: at the new baseline, the spread is mdmahfuzsumon 796.8 vs us ~800 — well inside ladder noise. The instrumentation step (3a) is still worth doing for its own sake, but it should NOT motivate weakening `path_collision_predicted` without much more compelling data.
-- **fedorbaart at 850.9 is now the only clearly-above-us peer in the research set**, but their actual scoring agent is in a separate submission — only their visualizer notebook is public to us.
+- mdmahfuzsumon (796.8) interpreted as roughly at parity with us, not above us. Three of the top-5 ranked techniques (#1 pincer, #2 map-control, #3 aggression scaling) source from mdmahfuzsumon — the red-team's concern #3 (n=1 selection bias) was sharpened.
+- The "simpler path-clearance correlates with higher score" finding (TL;DR #2) was weakened: at the assumed ~800 baseline, the spread mdmahfuzsumon 796.8 vs us ~800 was inside ladder noise.
+- fedorbaart at 850.9 was framed as the only clearly-above-us peer.
 
-**What does NOT change:**
+## Baseline update #2 — 2026-05-01 (later) — supersedes #1
 
-- mdmahfuzsumon is *more* valuable as a sparring partner now, not less — two roughly-equal agents produce sharper local A/B signal than a dominant-vs-weak pair.
-- Phase 2 success criterion (uncertainty reduction across the 4 techniques) is unchanged; weaker priors don't reduce the value of measured data.
-- All 4 Phase 2 candidates remain worth measuring; per-technique cost estimates haven't moved.
-- Per-codebase briefs themselves are unchanged (their author ladder data was correct as of 2026-05-01 09:44 UTC).
+The user reported v1.5G subsequently **drifted back down to just below 700 μ** with new submissions. This confirms what update #1 already flagged as risk: the ~800 reading was inside the variance band, not a stable improvement. Working baseline is now better described as **"~700 μ median with ~100 μ noise per submission"** — submissions can land anywhere in roughly 650-800.
 
-This addendum is layered on after the original synthesis was committed (commit `ca83317`). The body above is preserved verbatim as the original research deliverable; this section is the correction layer.
+**Corrected implications (this section supersedes update #1):**
+
+- **mdmahfuzsumon (796.8) is back to being above us.** The original TL;DR #1 framing ("ships at 796.8 μ — above our 655") was correct; the brief mid-day "at parity" interpretation was based on a high-noise ladder reading and is hereby walked back.
+- The red-team's concern #3 (n=1 selection bias on the only above-us peer) **stands as originally framed** — three of the top-5 ranked techniques source from mdmahfuzsumon, and they ARE above us, but n is still 1.
+- The "simpler path-clearance correlates with higher score" finding (TL;DR #2) is **back in play but still weak** — n=3 with confounders, per the red-team's original critique. Step 3a instrumentation results (when they land) will inform whether to act on it.
+- fedorbaart at 850.9 remains the highest-scoring author in the research set; mdmahfuzsumon and johnjanson are now both above us again.
+
+**What still does NOT change:**
+
+- mdmahfuzsumon as sparring partner remains valuable — having an above-us peer in the local pool is exactly the discriminator we wanted.
+- Phase 2 success criterion (uncertainty reduction across 4 techniques) is unchanged.
+- The 4 Phase 2 candidates remain worth measuring; per-technique cost estimates haven't moved.
+- Per-codebase briefs are unchanged (author ladder data was a snapshot at the time of pull).
+
+**Implication for Phase 2 thresholds (±35 μ, 7 subs / 5 days, calibrated under "option E" in the spec):** these may now be too tight. The ~100 μ submission-to-submission swing means a true +35 μ improvement could easily be masked by noise across 7 submissions. Worth revisiting the threshold calibration before Step 4's eventual ladder phase — likely loosening to ±50-75 μ and/or doubling the sample count.
+
+This addendum is layered on after the original synthesis was committed (commit `ca83317`). The body above is preserved verbatim as the original research deliverable. Update #1 is preserved for honest record-keeping; update #2 supersedes it.
 
 ## TL;DR
 
