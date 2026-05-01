@@ -231,3 +231,58 @@ Reorder to:
 5. Defer everything else pending results.
 
 Rationale: front-load the cheapest ladder-testable change so submission slots start producing data on day 1. Don't let "build infrastructure first" delay real measurement.
+
+---
+
+## Phase 3 outlook — 2026-05-01 (post Step 3a)
+
+This section consolidates new information from three sources that landed after the original synthesis: (a) Step 3a's path-collision instrumentation results, (b) user-side replay observations comparing v1.5G to top-of-leaderboard agents, and (c) `docs/research_documents/AI_Heuristics_for_Opponent_Analysis.md` — a user-compiled academic survey of advanced heuristic paradigms.
+
+### Step 3a result (path-collision exonerated)
+
+Counterfactual rollout over 50 self-play seeds: 5,733 aborts, 5,714 true positives, 19 false positives — **0.3% false-positive rate**. The check is doing exactly what it's supposed to. See `path_collision_instrumentation.md` (sibling file).
+
+**Implications:**
+- The original synthesis's TL;DR #2 ("simpler path-clearance correlates with higher score") is **NOT explained by v1.5G being over-conservative**. Peers' apparent edge — if real and not noise — must come from elsewhere.
+- The user's replay observation #3 (skipping nearby targets to chase distant whales) is **NOT path-collision-driven**. Of three hypotheses originally posed, only (a) — small-fleet-slow-speed interaction with moving targets — survives as a candidate explanation.
+
+### User replay observations (recorded in project memory)
+
+User watched top-agent replays and identified three patterns where v1.5G diverges:
+1. **Patient/concentrated attacks vs scatter.** Top agents send larger, more efficient fleets. v1.5G sends `target.ships + 1` minimum. Smaller fleets are slower and may miss moving targets.
+2. **Tracking enemy fleets headed to the same target.** Top agents account for in-flight enemy ships when sizing attacks on contested neutrals. v1.5G tracks `inbound_friendly` but not `inbound_enemy` for non-owned targets.
+3. **Cluster-build vs whale-hunt early game.** Top agents build small captures early, take whales when strategically advantageous. v1.5G appears to skip nearby smaller targets in favor of distant high-value unclaimed neutrals — likely a knock-on from observation #1's small-slow-fleet problem.
+
+These map directly to Phase 1 candidate techniques we already deferred: omega-v5's speed-optimal-send (#9), mdmahfuzsumon's `enemy_is_targeting` and rahulchauhan016's `_tgt(f)` enemy-destination inference (#7-8). The replay observations promote these from "n=1 from below-us peer" to "also visible in top-tier gameplay."
+
+### Cross-applicable concepts from `AI_Heuristics_for_Opponent_Analysis.md`
+
+The user's research doc is a broad academic survey. Most of its highly-touted techniques (CBS/WDG MAPF, flow fields, GHTN, VAD-CFR, MpFL/PEARL-SGD) are designed for problem shapes Orbit Wars doesn't have — many-agent grid-based pathfinding, federated learning, etc. Five concepts genuinely map to v1.5G with feasible dev cost in our remaining time:
+
+1. **Constant Bearing Angle (CBA) interception** — geometric alternative to our `aim_with_prediction` fixed-point lead-aim. Maintains constant bearing rather than predicting absolute future position. Could be a 1-day prototype as an alternative aim mode for moving targets (orbiting planets, comets). Worth A/B-comparing.
+2. **Influence maps (convolution-based)** — discretized grid representing control/threat/contested-status. Lets us answer "which planet is contested? safe? high tactical value?" via single grid query instead of recomputing per-decision. Maps cleanly to user replay observation #2 (track enemy attacks on shared targets) and to the queued Step 4. ~2-3 days dev.
+3. **Utility AI / Tactical Position Selection (TPS) scoring framework** — formalization of what `target_value` could become if we expand from greedy nearest-target. The "weighted average for normal scoring + multiplicative absolute vetoes (0=skip)" pattern is a clean upgrade. Integrates the map-control bonus, vulnerability-window scoring, and other Phase 1 candidates under one framework.
+4. **Lightweight Bayesian opponent modeling** — track each opponent's historical aggression/defense ratios instead of treating all opponents uniformly. mdmahfuzsumon's `compute_enemy_aggression` is already this idea in shallowest form. Could enrich `find_threats`. ~1-2 days.
+5. **Decentralized "ticket" coordination for multi-source attacks** — each owned planet posts a "want to launch X ships at target Y" ticket; planner aggregates and commits jointly. Slightly more elegant than mdmahfuzsumon's `find_coordinated_sources`. Direct fit for Step 4.
+
+### Expanded Phase 3 candidate priority (incorporating all three sources)
+
+Reordering to reflect the new information. Items at the top are highest signal × lowest cost:
+
+1. **Track inbound_enemy on contested neutrals + adjust `compute_needed`** — addresses replay observation #2 directly, no new framework needed. Uses bearing-projection like mdmahfuzsumon's `enemy_is_targeting`. ~half a day. Likely the single highest-leverage change in this list.
+2. **Speed-optimal-send sizing** (omega-v5 pattern, also implied by replay observations 1 and 3) — compare "send needed" vs "send 92% of available", over-commit if larger fleet saves ≥1 turn. Addresses both observations 1 and 3 (the "small fleets are slow" root cause). ~a day. Risk: needs reserve interaction, can leave source defenseless if poorly tuned.
+3. **Expand greedy from nearest-target to value-scored target** (utility AI / TPS framework) — switches from `dist`-only sort to a proper scoring function with normalized criteria + absolute vetoes. Becomes the integration point for map-control bonus, vulnerability-window scoring, central-planet preference, etc. ~2-3 days but unlocks multiple subsequent gains.
+4. **Multi-source paired pincer** (already queued as Step 4, mdmahfuzsumon-style) — ticket-based variant per the AI_Heuristics doc would be a small architectural improvement.
+5. **Influence map for contested/threat assessment** — formalization of point #1 plus more. ~2-3 days dev for the data structure + ~1 day to wire into existing scoring. Unlocks downstream techniques.
+6. **CBA interception** — alternative aim mode for moving targets. Standalone, comparable via a config toggle. ~1 day.
+7. **Lightweight Bayesian opponent modeling** — track per-opponent aggression to scale defense reserves. ~1-2 days.
+8. **Vulnerability-window scoring** (omega-v5) — track enemy planets that just emitted ships → boost target value. ~half a day.
+
+Things still **deferred / not worth pursuing** in our remaining 7 weeks:
+- CBS/WDG/MAPF frameworks, flow fields, GHTN, VAD-CFR/SHOR-PSRO, federated learning — wrong problem shape or wrong infrastructure cost (per AI_Heuristics doc evaluation).
+- Pure RL anything (per RL-with-heuristics synthesis in the sibling directory).
+- The eco-mode state machine and planet triage (per original Phase 1 deep dives #10-11).
+
+### Note on baseline noise
+
+CLAUDE.md's working baseline of v1.5G at ~700 μ with ~100 μ noise per submission means **our Phase 2 ±35 μ thresholds are likely too tight to catch any of these single-technique improvements via ladder data alone**. Recommend: when implementing any of the above for ladder testing, either (a) loosen thresholds to ±50-75 μ, (b) increase per-technique sample counts to ~12 subs, or (c) bundle 2-3 techniques into a single submission to amplify signal at the cost of attribution clarity.
