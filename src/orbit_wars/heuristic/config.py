@@ -63,10 +63,12 @@ class HeuristicConfig:
     # ----- Offense planner -----
     # `True` uses scipy linear_sum_assignment (Hungarian) for one-to-one optimal
     # src→target matching. `False` falls back to v1.4-style greedy: each src
-    # picks its nearest viable target. Defaults to Hungarian; flag retained
-    # for A/B testing because v1.5 (Hungarian + defense) regressed -100 μ on
-    # Kaggle vs v1.4 (greedy, no defense).
-    use_hungarian_offense: bool = True
+    # picks its nearest viable target. Default switched to greedy in v1.5G —
+    # v1.5 (Hungarian + defense) had regressed -100 μ on Kaggle vs v1.4
+    # (greedy, no defense), and local opponents don't differentiate the two,
+    # so we ship the offense planner that matched v1.4's 700.5 score and add
+    # defense on top for a controlled A/B against the deployed v1.5.
+    use_hungarian_offense: bool = False
 
     # ----- Time budget -----
     soft_act_deadline_fraction: float = 0.82    # E6 — act with 82% of max_time
