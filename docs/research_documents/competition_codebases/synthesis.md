@@ -3,7 +3,27 @@
 **Date:** 2026-05-01
 **Phase:** 1 (research only, no implementation)
 **Sources:** 6 per-codebase briefs in this directory
-**Author ladder context:** all 6 authors verified against `_research_workspace/leaderboard.csv` (downloaded 2026-05-01 09:44 UTC). Ranks 318-988, scores 616.4-850.9. Top of LB is 1623.1 (Shun_PI). Our v1.5G sits at ~600-655 μ — *middle of this peer cohort, not behind it*.
+**Author ladder context:** all 6 authors verified against `_research_workspace/leaderboard.csv` (downloaded 2026-05-01 09:44 UTC). Ranks 318-988, scores 616.4-850.9. Top of LB is 1623.1 (Shun_PI). Our v1.5G sits at ~600-655 μ — *middle of this peer cohort, not behind it*. **(See Baseline update below — this number was an early-game underestimate; v1.5G's latest reading is ~800 μ, which materially changes the cohort framing.)**
+
+## Baseline update — 2026-05-01 (post-publication)
+
+After the synthesis above was committed, the user clarified that **v1.5G's latest ladder reading is hovering just under 800 μ — approximately 100 points above the two prior submissions** (which were v1.5-Hungarian variants). Treat the new ~800 baseline as a working number, not a settled truth: the ~100 μ swing across submissions is at the edge of plausible ladder noise.
+
+**Implications for the rankings in the body above:**
+
+- **mdmahfuzsumon (796.8) is now roughly at parity with us, not above us.** The "only above-us peer" framing in TL;DR #1 and several per-technique deep dives is wrong.
+- Three of the top-5 ranked techniques (#1 pincer, #2 map-control, #3 aggression scaling) source from mdmahfuzsumon. The red-team's concern #3 (n=1 selection bias) is sharper now — the single source isn't above us at all.
+- The "simpler path-clearance correlates with higher score" finding (TL;DR #2) is weakened: at the new baseline, the spread is mdmahfuzsumon 796.8 vs us ~800 — well inside ladder noise. The instrumentation step (3a) is still worth doing for its own sake, but it should NOT motivate weakening `path_collision_predicted` without much more compelling data.
+- **fedorbaart at 850.9 is now the only clearly-above-us peer in the research set**, but their actual scoring agent is in a separate submission — only their visualizer notebook is public to us.
+
+**What does NOT change:**
+
+- mdmahfuzsumon is *more* valuable as a sparring partner now, not less — two roughly-equal agents produce sharper local A/B signal than a dominant-vs-weak pair.
+- Phase 2 success criterion (uncertainty reduction across the 4 techniques) is unchanged; weaker priors don't reduce the value of measured data.
+- All 4 Phase 2 candidates remain worth measuring; per-technique cost estimates haven't moved.
+- Per-codebase briefs themselves are unchanged (their author ladder data was correct as of 2026-05-01 09:44 UTC).
+
+This addendum is layered on after the original synthesis was committed (commit `ca83317`). The body above is preserved verbatim as the original research deliverable; this section is the correction layer.
 
 ## TL;DR
 
