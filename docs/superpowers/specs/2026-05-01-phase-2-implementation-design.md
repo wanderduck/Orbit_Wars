@@ -187,3 +187,43 @@ All 4 steps have completed their cycle:
 - Step 3a: instrumentation report written and committed; 3b decision (fast-track / defer / kill) made.
 - Step 4: multi-source pincer has either been adopted or reverted based on ladder data; result documented.
 - Phase 2 wrap-up doc committed at `docs/research_documents/phase2_results.md` with per-technique results and Phase 3 candidate list.
+
+---
+
+## Step 4 expansion (added 2026-05-01 evening)
+
+After Step 3a's path-collision check was exonerated (0.3% FP rate; see `docs/research_documents/competition_codebases/path_collision_instrumentation.md`), the `synthesis.md` Phase 3 outlook re-ranked candidates and identified two Phase 1 deep-dives that became higher-leverage than the original Step 4 multi-source pincer alone — both reinforced independently by user replay observations of top-tier agents. Per user direction, Step 4 is **expanded to bundle three techniques** under one branch + one ladder cycle:
+
+### Bundled techniques (three independent `HeuristicConfig` toggles)
+
+1. **`track_inbound_enemy_enabled` (default True)** — addresses replay observation #2 ("v1.5G ignores enemy fleets racing for the same neutral target"). Build an `inbound_enemy[target_id]` dict alongside the existing `inbound_friendly` tracking. Use rahulchauhan016-style bearing-projection to infer each enemy fleet's destination (within 0.28 rad of nearest planet on bearing). When toggle is True, `compute_needed` for non-owned targets adds `inbound_enemy.get(target_id, 0)` to the defender count.
+2. **`speed_optimal_send_enabled` (default True)** — addresses replay observations #1 and #3 (small-fleet slowness; whale-hunting). Per omega-v5 (paper-1 brief): when sizing a launch, compare `(needed, eta_at_needed)` vs `(0.92 * available, eta_at_overship)`. If the larger fleet saves ≥1 turn (`fleet_speed(over) > fleet_speed(needed)` enough to shave a turn off ETA), use the larger size. The "ships paid extra" cost is dominated by "production-turns gained at target post-capture."
+3. **`multi_source_pincer_enabled` (default True)** — original Step 4 spec, mdmahfuzsumon-style: when nearest source can't field `needed` for an enemy target, search owned planets for a partner whose available ships cover the deficit; commit both same turn, no arrival-time matching. Critical interaction: defense reserve must be recomputed against both sources' depleted garrisons before launches commit.
+
+All three default True post-merge so the active baseline tests the bundle. They are independent toggles so we can ablate later if the bundle ships positive but we want to attribute credit.
+
+### Branch and workflow
+
+- Branch: `phase2/04-pincer-and-fleet-sizing` (renamed from the originally-spec'd `phase2/04-multi-source-pincer` to reflect expanded scope).
+- All other workflow rules from the original Step 4 design apply (local A/B vs `peer_mdmahfuzsumon`, defensive auto-revert on ladder regression, etc.).
+
+### Threshold recalibration
+
+The original ±35 μ thresholds were calibrated for an assumed ~100 μ swing on v1.5G. CLAUDE.md now confirms that swing is real (v1.5G drifted from ~800 back to ~700 μ). With per-submission noise of ~100 μ, the noise on a sample mean over N submissions is ~`100/sqrt(N)`. To detect a +30-50 μ effect at reasonable confidence we need ~10-15 samples. **New thresholds for Step 4 ladder phase (option E recalibrated):**
+
+- **Cadence:** min **12 subs OR 7 days** (was 7 / 5).
+- **Adopt/revert decision rule:**
+  - Δ < -50 μ → defensive auto-revert.
+  - -50 ≤ Δ < +50 μ → I report data, default recommendation **revert** (per Phase 2 uncertainty-reduction goal). User can override to keep.
+  - Δ ≥ +50 μ → default-keep adopted; user can override.
+- **Hard-regression hot revert:** if at any point Δ < -100 μ after at least 5 subs, immediate auto-revert.
+
+Rationale: with three techniques bundled, expected combined effect is larger than any single change would have produced — a +30-50 μ joint effect is plausible if all three contribute. The ±50 μ band still fits inside one noise σ but is roughly half the per-sub swing, so a clean signal at 12 subs should clear it. The 7-day cap caps Phase 2 wall-clock burn.
+
+### Local A/B gate (unchanged from Step 4 original)
+
+100 self-play seeds vs `peer_mdmahfuzsumon`, all-three-toggles-on vs all-three-toggles-off, ≤1% win-rate degradation tolerance. Same `random.seed(42)` once before loop. If local gate fails, the bundle does NOT ship; we ablate which toggle is responsible (turn each off individually) before deciding whether any single technique is salvageable.
+
+### Updated Done state for Step 4
+
+Either: (a) bundle ships and ladder cycle completes with Δ measured against the new ±50 μ thresholds; (b) local A/B fails and we ablate / abandon the bundle; (c) ladder cycle completes negatively and the merge is reverted. In any case, Step 4 wraps when a definitive decision is made and the result is written into the Phase 2 wrap-up doc.
