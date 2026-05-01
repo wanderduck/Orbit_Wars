@@ -71,6 +71,11 @@ class ObservationView:
         raw_comets = obs_get(obs, "comets", []) or []
         comet_ids = obs_get(obs, "comet_planet_ids", []) or []
 
+        # kaggle_environments populates obs.step (1-indexed turn). Fall back to
+        # the keyword arg only if the env didn't supply one (e.g., synthetic obs in tests).
+        obs_step = obs_get(obs, "step", None)
+        resolved_step = int(obs_step) if obs_step is not None else int(step)
+
         return cls(
             player=int(obs_get(obs, "player", 0) or 0),
             planets=tuple(Planet(*p) for p in raw_planets),
@@ -80,7 +85,7 @@ class ObservationView:
             comets=tuple(dict(c) if not isinstance(c, dict) else c for c in raw_comets),
             comet_planet_ids=frozenset(int(i) for i in comet_ids),
             remaining_overage_time=float(obs_get(obs, "remainingOverageTime", 0.0) or 0.0),
-            step=int(step),
+            step=resolved_step,
         )
 
     @property

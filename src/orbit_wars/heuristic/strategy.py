@@ -71,6 +71,9 @@ class Threat:
 
 _DEFAULT_CONFIG = HeuristicConfig.default()
 
+# Total episode length (per kaggle_environments env config: episodeSteps=500).
+EPISODE_STEPS: int = 500
+
 
 def agent(obs: Any, config: HeuristicConfig | None = None) -> list[list[float | int]]:
     """Minimal heuristic v1 agent.
@@ -126,6 +129,9 @@ def _decide_with_decisions(
         return [], []
 
     world = WorldModel.from_observation(view, horizon=cfg.sim_horizon)
+    # `view.step` is 1-indexed (kaggle_environments populates obs.step for the
+    # current turn). remaining_steps = turns left in the episode after this one.
+    remaining_steps = max(0, EPISODE_STEPS - view.step)
 
     moves: list[list[float | int]] = []
     decisions: list[LaunchDecision] = []
@@ -135,7 +141,9 @@ def _decide_with_decisions(
     # the nearest viable source. Defense reservations subtract from the offense
     # budget per source via `used_ships`.
     threats = find_threats(view, world, cfg)
-    defense_moves, defense_decisions, used_ships = plan_defense(view, world, threats, cfg)
+    defense_moves, defense_decisions, used_ships = plan_defense(
+        view, world, threats, cfg, remaining_steps=remaining_steps,
+    )
     moves.extend(defense_moves)
     decisions.extend(defense_decisions)
 
@@ -148,6 +156,7 @@ def _decide_with_decisions(
     target_planets = [p for p in view.planets if p.owner != view.player]
     offense_moves, offense_decisions = _plan_offense_hungarian(
         view, world, cfg, target_planets, used_ships,
+        remaining_steps=remaining_steps,
     )
     moves.extend(offense_moves)
     decisions.extend(offense_decisions)
@@ -161,6 +170,8 @@ def _plan_offense_hungarian(
     cfg: HeuristicConfig,
     target_planets: list[Planet],
     used_ships: dict[int, int],
+    *,
+    remaining_steps: int,
 ) -> tuple[list[list[float | int]], list[LaunchDecision]]:
     """Build candidate launches and solve the (src → target) assignment via Hungarian.
 
@@ -168,7 +179,8 @@ def _plan_offense_hungarian(
     Sources with no viable target produce no launch. Each src matched to at most
     one target; each target matched to at most one src (per turn).
     """
-    # Step 1: collect viable candidates
+    # Step 1: collect viable candidates (skipping launches that arrive after
+    # episode end — wasted ships).
     candidates: list[tuple[Planet, Planet, float, int, int]] = []
     for src in view.my_planets:
         committed = used_ships.get(src.id, 0)
@@ -180,6 +192,8 @@ def _plan_offense_hungarian(
             if result is None:
                 continue
             angle, ships, eta = result
+            if eta > remaining_steps:
+                continue  # launch would arrive after episode ends
             candidates.append((src, target, angle, ships, eta))
 
     if not candidates:
@@ -278,6 +292,8 @@ def plan_defense(
     world: WorldModel,
     threats: list[Threat],
     cfg: HeuristicConfig,
+    *,
+    remaining_steps: int = EPISODE_STEPS,
 ) -> tuple[list[list[float | int]], list[LaunchDecision], dict[int, int]]:
     """Plan reinforcement launches for threats; returns (moves, decisions, used_ships).
 
@@ -367,6 +383,8 @@ def plan_defense(
             angle, eta = probe2
             if eta > threat.fall_turn:
                 continue
+            if eta > remaining_steps:
+                continue  # arrives after episode ends
 
             # Path-clearance: don't lose the reinforcement to an interceptor.
             # Pass comet paths so the check is comet-aware.
