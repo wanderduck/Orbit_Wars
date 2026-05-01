@@ -34,8 +34,9 @@ def play(
     seed: int | None = typer.Option(None, "--seed", help="Episode seed for reproducibility."),
 ) -> None:
     """Run one or more local self-play episodes."""
+    import sys
+
     from kaggle_environments import make
-    import sys, os
     sys.path.insert(0, str(_SRC))
     import main as my_main
 
@@ -69,20 +70,107 @@ def play(
     console.print(f"[bold]Result:[/bold] {wins}W-{ties}T-{losses}L over {episodes} episode(s) vs {opponent}")
 
 
+_BUILTIN_OPPONENTS = {"random", "starter"}
+_PACKAGE_OPPONENTS = {
+    "competent_sniper": "orbit_wars.opponents.competent_sniper",
+    "aggressive_swarm": "orbit_wars.opponents.aggressive_swarm",
+    "defensive_turtle": "orbit_wars.opponents.defensive_turtle",
+}
+
+
+def _resolve_opponent(name: str):
+    """Map a user-supplied opponent name to a runnable agent.
+
+    Built-ins (``random``, ``starter``) stay as strings — kaggle_environments
+    looks them up internally. Package opponents and ``.py`` paths are loaded
+    and the ``agent`` callable returned.
+    """
+    name = name.strip()
+    if name in _BUILTIN_OPPONENTS:
+        return name
+    import importlib
+    if name in _PACKAGE_OPPONENTS:
+        return importlib.import_module(_PACKAGE_OPPONENTS[name]).agent
+    if name.endswith(".py"):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(f"opp_{Path(name).stem}", name)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"could not load opponent file: {name}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.agent
+    # fall back to module path if it looks like one
+    if "." in name:
+        return importlib.import_module(name).agent
+    raise ValueError(
+        f"unknown opponent '{name}' — expected built-in "
+        f"({', '.join(sorted(_BUILTIN_OPPONENTS))}), package alias "
+        f"({', '.join(sorted(_PACKAGE_OPPONENTS))}), .py path, or module path"
+    )
+
+
 @app.command()
 def ladder(
     opponents: str = typer.Option(
-        "nearest_sniper,random",
+        "random,starter,competent_sniper,aggressive_swarm,defensive_turtle",
         "--opponents",
-        help="Comma-separated opponent list.",
+        help="Comma-separated opponent list. Built-ins or package aliases (see _PACKAGE_OPPONENTS).",
     ),
-    episodes_per_opponent: int = typer.Option(50, "--episodes-per-opponent"),
+    episodes_per_opponent: int = typer.Option(20, "--episodes-per-opponent"),
+    seed_start: int = typer.Option(0, "--seed-start", help="First env seed (others are seed_start+ep)."),
 ) -> None:
-    """Round-robin local ladder against a list of opponents."""
-    console.print(
-        f"[yellow]TODO[/yellow]: ladder opponents={opponents} episodes_per_opponent={episodes_per_opponent}"
-    )
-    console.print("Implemented in C3 part-2. Renders win-rate matrix via Rich.")
+    """Round-robin local ladder against a list of opponents.
+
+    Plays our heuristic as player 0 in every episode. Each opponent gets
+    ``episodes_per_opponent`` episodes with seeds ``seed_start..seed_start+N-1``.
+    Renders a Rich table of W/T/L/win-rate.
+    """
+    import importlib
+    import sys
+
+    from kaggle_environments import make
+    from rich.table import Table
+
+    sys.path.insert(0, str(_SRC))
+    main_mod = importlib.import_module("main")
+
+    opp_names = [o.strip() for o in opponents.split(",") if o.strip()]
+    rows: list[tuple[str, int, int, int, float]] = []
+    for opp_name in opp_names:
+        try:
+            opp = _resolve_opponent(opp_name)
+        except (ValueError, ImportError, AttributeError) as exc:
+            console.print(f"[red]✗[/red] {opp_name}: {exc}")
+            continue
+        wins = ties = losses = 0
+        for ep in range(episodes_per_opponent):
+            env = make(
+                "orbit_wars",
+                debug=False,
+                configuration={"seed": seed_start + ep},
+            )
+            env.run([main_mod.agent, opp])
+            r0, r1 = env.steps[-1][0].reward, env.steps[-1][1].reward
+            if r0 > r1:
+                wins += 1
+            elif r0 < r1:
+                losses += 1
+            else:
+                ties += 1
+        wr = wins / episodes_per_opponent if episodes_per_opponent else 0.0
+        rows.append((opp_name, wins, ties, losses, wr))
+        console.print(f"  {opp_name}: {wins}W-{ties}T-{losses}L ({wr:.0%})")
+
+    table = Table(title=f"Ladder: heuristic vs {len(rows)} opponents (n={episodes_per_opponent} each)")
+    table.add_column("Opponent")
+    table.add_column("W", justify="right")
+    table.add_column("T", justify="right")
+    table.add_column("L", justify="right")
+    table.add_column("Win-rate", justify="right")
+    for name, w, t, lo, wr in rows:
+        wr_color = "green" if wr >= 0.8 else "yellow" if wr >= 0.5 else "red"
+        table.add_row(name, str(w), str(t), str(lo), f"[{wr_color}]{wr:.0%}[/{wr_color}]")
+    console.print(table)
 
 
 @app.command()
