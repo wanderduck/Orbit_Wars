@@ -75,6 +75,7 @@ _PACKAGE_OPPONENTS = {
     "competent_sniper": "orbit_wars.opponents.competent_sniper",
     "aggressive_swarm": "orbit_wars.opponents.aggressive_swarm",
     "defensive_turtle": "orbit_wars.opponents.defensive_turtle",
+    "peer_mdmahfuzsumon": "orbit_wars.opponents.peer_mdmahfuzsumon",
 }
 
 
@@ -112,7 +113,7 @@ def _resolve_opponent(name: str):
 @app.command()
 def ladder(
     opponents: str = typer.Option(
-        "random,starter,competent_sniper,aggressive_swarm,defensive_turtle",
+        "random,starter,competent_sniper,aggressive_swarm,defensive_turtle,peer_mdmahfuzsumon",
         "--opponents",
         help="Comma-separated opponent list. Built-ins or package aliases (see _PACKAGE_OPPONENTS).",
     ),
