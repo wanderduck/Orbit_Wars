@@ -162,3 +162,40 @@
 5. Vulnerability-window scoring as a separate experiment.
 
 Everything else: defer pending Phase 2 experiment results.
+
+---
+
+## Red-team review
+
+*Independent critique by a fresh-context reviewer. Date: 2026-05-01.*
+
+### Concerns
+
+1. **"3 of 4 functional agents do multi-source" is overstated (TL;DR #1, line 10; pattern §, line 21).** The mdmahfuzsumon and johnjanson briefs explicitly describe pincer / 3-source swarms. The rahulchauhan016 brief describes MCTS with a per-source candidate pool ("nearest-7 enemies/neutrals per source", brief line 19) — that is per-source, not multi-source coordination. Calling MCTS "implicit multi-source" is the synthesis's inference, not the brief's claim. Honest count is 2/4 explicit + 1 unclear. Weakens but does not kill the pattern signal.
+
+2. **The "simpler path-clearance correlates with higher score" finding (TL;DR #2, line 11; pattern §, lines 26-30) is n=3 and badly confounded.** The synthesis itself flags "skill gaps, opponent matchmaking, small sample" then still leads with this in the TL;DR and lists "instrument path-collision aborts" as Phase 2 priority #4. With n=3 across very different agents, this is one anecdote dressed up. The framing in §"Most uncomfortable finding" (line 151) — "the rule we treat as load-bearing" — risks motivating a regression-prone change. Fine to instrument; do NOT let it justify weakening `path_collision_predicted` without measurement.
+
+3. **mdmahfuzsumon is over-weighted because it's the only above-us peer (n=1 selection bias).** Three of the top 5 ranked techniques (#1 pincer, #2 map-control, #3 aggression scaling) all come from this single source. The "evidence × fit × cost" framing implies multi-source corroboration; in fact items #2 and #3 have evidence = "one author who outscores us by ~140μ." If mdmahfuzsumon's score is partly luck/matchmaking rather than skill, the entire top-3 collapses. The synthesis should disclose this concentration explicitly.
+
+4. **"Add mdmahfuzsumon as sparring partner FIRST" (Phase 2 step 1) burns a step that could be parallel.** Vendoring a third-party agent for local A/B is useful, but it has zero ladder impact — it just unsticks local signal. The same calendar week could spend a submission slot on the trivially-cheap map-control bonus toggle (#2, "minutes" cost) and get real ladder data. Recommend swapping order: ship the cheapest A/B-able single-line change, gather ladder evidence in parallel with the sparring-partner port.
+
+5. **No discussion of the ~3 submissions/day budget constraint from CLAUDE.md.** Phase 2 lists 5 items but doesn't translate to "X submission slots over Y days." With ~3/day and ladder noise (CLAUDE.md notes v1.5 went 600→655 with more games — sample variance unresolved), each candidate plausibly needs 5-10 submissions to differentiate. The synthesis implicitly assumes plenty of slots.
+
+6. **"All 6 authors verified against leaderboard.csv" (line 6) is technically false.** rauffauzanrambe is not on the leaderboard (per their own brief). Minor, but it's the kind of overstatement the synthesis correctly criticizes others for in TL;DR #5.
+
+### Things the synthesis got right that should be preserved
+
+- Skepticism of marketing titles and "neural" framings. The rauffauzanrambe and rahulchauhan016 dismissals are well-supported by their briefs and save real dev time.
+- The "we are middle of cohort, top-10 needs something none of these notebooks have" framing (lines 143, 153) is honest and resists silver-bullet thinking.
+- Deferring eco-mode state machine (#10) is correctly justified — high tuning surface, source author below us.
+
+### Suggested edits to the Phase 2 priority ordering
+
+Reorder to:
+1. **Map-control bonus** (was #3) — minutes of work, single toggle, ladder-testable immediately.
+2. **Add mdmahfuzsumon sparring partner** (was #1) — runs in parallel to #1's ladder games.
+3. **Instrument path-collision aborts** (was #4) — measure BEFORE acting on the n=3 finding.
+4. **Multi-source paired pincer** (was #2) — moderate cost, defer until after #1/#3 yield signal so we can isolate effect.
+5. Defer everything else pending results.
+
+Rationale: front-load the cheapest ladder-testable change so submission slots start producing data on day 1. Don't let "build infrastructure first" delay real measurement.
