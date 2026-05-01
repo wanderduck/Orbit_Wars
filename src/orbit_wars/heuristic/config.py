@@ -60,6 +60,14 @@ class HeuristicConfig:
     reinforce_min_future_turns: int = 40
     reinforce_hold_lookahead: int = 20
 
+    # ----- Offense planner -----
+    # `True` uses scipy linear_sum_assignment (Hungarian) for one-to-one optimal
+    # src→target matching. `False` falls back to v1.4-style greedy: each src
+    # picks its nearest viable target. Defaults to Hungarian; flag retained
+    # for A/B testing because v1.5 (Hungarian + defense) regressed -100 μ on
+    # Kaggle vs v1.4 (greedy, no defense).
+    use_hungarian_offense: bool = True
+
     # ----- Time budget -----
     soft_act_deadline_fraction: float = 0.82    # E6 — act with 82% of max_time
     heavy_route_planet_limit: int = 32          # E6

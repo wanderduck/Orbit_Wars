@@ -154,13 +154,71 @@ def _decide_with_decisions(
     # greedy failure mode where multiple sources race to the same nearest
     # target while leaving other targets uncontested.
     target_planets = [p for p in view.planets if p.owner != view.player]
-    offense_moves, offense_decisions = _plan_offense_hungarian(
+    offense_planner = _plan_offense_hungarian if cfg.use_hungarian_offense else _plan_offense_greedy
+    offense_moves, offense_decisions = offense_planner(
         view, world, cfg, target_planets, used_ships,
         remaining_steps=remaining_steps,
     )
     moves.extend(offense_moves)
     decisions.extend(offense_decisions)
 
+    return moves, decisions
+
+
+def _plan_offense_greedy(
+    view: ObservationView,
+    world: WorldModel,
+    cfg: HeuristicConfig,
+    target_planets: list[Planet],
+    used_ships: dict[int, int],
+    *,
+    remaining_steps: int,
+) -> tuple[list[list[float | int]], list[LaunchDecision]]:
+    """v1.4-style greedy offense planner: each src picks its nearest viable target.
+
+    Allows multiple srcs to target the same target (no one-to-one constraint).
+    Doesn't try to globally optimize. This was v1.4's only offense planner —
+    retained for A/B testing whether Hungarian (v1.5) actually wins on the
+    real Kaggle ladder.
+    """
+    moves: list[list[float | int]] = []
+    decisions: list[LaunchDecision] = []
+    for src in view.my_planets:
+        committed = used_ships.get(src.id, 0)
+        available = int(src.ships) - committed
+        if available < cfg.min_launch:
+            continue
+        sorted_targets = sorted(
+            target_planets, key=lambda t: dist(src.x, src.y, t.x, t.y),
+        )
+        for target in sorted_targets:
+            result = _try_launch(src, target, view, world, cfg, available)
+            if result is None:
+                continue
+            angle, ships, eta = result
+            if eta > remaining_steps:
+                continue
+            moves.append([src.id, float(angle), int(ships)])
+            decisions.append(
+                LaunchDecision(
+                    src_id=src.id,
+                    target_id=target.id,
+                    angle=float(angle),
+                    ships=int(ships),
+                    eta=int(eta),
+                    src_ships_pre_launch=int(src.ships),
+                    target_ships_at_launch=int(target.ships),
+                    target_owner=int(target.owner),
+                    target_x=float(target.x),
+                    target_y=float(target.y),
+                    target_radius=float(target.radius),
+                    target_is_static=is_static_planet(target.x, target.y, target.radius),
+                    target_is_comet=view.is_comet(target.id),
+                    mission="capture",
+                )
+            )
+            used_ships[src.id] = used_ships.get(src.id, 0) + ships
+            break  # one launch per src per turn (v1.4 semantics)
     return moves, decisions
 
 
