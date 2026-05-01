@@ -16,3 +16,4 @@ __pycache__/
 
 # Worktrees (if any are created by orchestration runs)
 .worktrees/
+_research_workspace/
