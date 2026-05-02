@@ -178,3 +178,60 @@ def evaluate_fitness_local(
         "sanity_winrates": sanity_winrates,
         "wall_clock_seconds": time.time() - started,
     }
+
+
+# ---------------------------------------------------------------------------
+# Modal app — image, function, local entrypoint
+# ---------------------------------------------------------------------------
+
+import modal  # noqa: E402  (intentionally below pure helpers)
+
+MINUTES = 60
+
+# Image: Python 3.13 + project deps + our src/ tree.
+# `add_local_dir(..., copy=True)` bakes src/ into the image so it's available
+# at /app/src inside the container.
+tuner_image = (
+    modal.Image.debian_slim(python_version="3.13")
+    .uv_pip_install(
+        "cma>=3.3.0",
+        "scipy>=1.14",
+        "numpy>=2.0",
+        "kaggle_environments>=1.18.0",
+    )
+    .add_local_dir(
+        local_path=str(Path(__file__).parent.parent),  # = src/
+        remote_path="/app/src",
+        copy=True,
+    )
+)
+
+app = modal.App("orbit-wars-cma-tuner", image=tuner_image)
+
+
+@app.function(
+    image=tuner_image,
+    cpu=2.0,
+    memory=4096,
+    timeout=20 * MINUTES,
+)
+def evaluate_fitness(
+    cfg_dict: dict,
+    candidate_id: int,
+    generation: int,
+    sanity_n_per_opponent: int,
+    fitness_n_per_opponent: int,
+    sanity_threshold: float,
+) -> dict:
+    """Modal-side wrapper: ensures src/ is on sys.path, then delegates."""
+    import sys as _sys
+    if "/app/src" not in _sys.path:
+        _sys.path.insert(0, "/app/src")
+    return evaluate_fitness_local(
+        cfg_dict=cfg_dict,
+        candidate_id=candidate_id,
+        generation=generation,
+        sanity_n_per_opponent=sanity_n_per_opponent,
+        fitness_n_per_opponent=fitness_n_per_opponent,
+        sanity_threshold=sanity_threshold,
+    )
