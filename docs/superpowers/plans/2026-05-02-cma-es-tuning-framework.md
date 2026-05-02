@@ -54,29 +54,29 @@ You are implementing a CMA-ES hyperparameter tuner for an Orbit Wars Kaggle comp
 **Files:**
 - Modify: `pyproject.toml`
 
-- [ ] **Step 1: Read pyproject.toml dependencies section to find insertion point**
+- [x] **Step 1: Read pyproject.toml dependencies section to find insertion point**
 
 Run: `grep -n "^dependencies = \[" pyproject.toml`
 
 Note the line number. The dependencies list ends at the line containing `"modal>=1.4.2",`.
 
-- [ ] **Step 2: Add `cma>=3.3.0` to dependencies**
+- [x] **Step 2: Add `cma>=3.3.0` to dependencies**
 
 Insert immediately above the closing `]` of the `dependencies` list. After edit, verify via:
 Run: `grep -A 30 "^dependencies = \[" pyproject.toml | grep cma`
 Expected: `    "cma>=3.3.0",`
 
-- [ ] **Step 3: Sync the lockfile and install**
+- [x] **Step 3: Sync the lockfile and install**
 
 Run: `uv sync`
 Expected: completes without errors, downloads cma wheel.
 
-- [ ] **Step 4: Verify cma is importable**
+- [x] **Step 4: Verify cma is importable**
 
 Run: `uv run python -c "import cma; print(cma.__version__)"`
 Expected: prints a version like `3.3.0` or higher (anything ≥3.3.0). Should NOT raise ImportError.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git status -s  # MUST run first per CLAUDE.md — verify only pyproject.toml + uv.lock are staged
@@ -93,7 +93,7 @@ If `git status -s` shows other files staged from parallel GitHub Desktop work, `
 **Files:**
 - Create: `tests/test_heuristic_tuner.py`
 
-- [ ] **Step 1: Create the failing test file**
+- [x] **Step 1: Create the failing test file**
 
 ```python
 """Tests for the CMA-ES heuristic tuning framework.
@@ -148,7 +148,7 @@ class TestParamSpaceCoverage:
             assert isinstance(is_int, bool), f"{name}: is_int must be bool"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py -v`
 Expected: ImportError or ModuleNotFoundError on `from tools.heuristic_tuner_param_space import ...`. Tests cannot collect.
@@ -160,7 +160,7 @@ Expected: ImportError or ModuleNotFoundError on `from tools.heuristic_tuner_para
 **Files:**
 - Create: `src/tools/heuristic_tuner_param_space.py`
 
-- [ ] **Step 1: Create the module with PARAM_SPACE table for all 48 numeric fields**
+- [x] **Step 1: Create the module with PARAM_SPACE table for all 48 numeric fields**
 
 Create file with this exact content (the bounds carry over from `docs/research_documents/ParamSpace_meta.md` which the user researched in Phase 3 brainstorm):
 
@@ -316,14 +316,14 @@ def decode(x: np.ndarray) -> HeuristicConfig:
     return HeuristicConfig(**kwargs)
 ```
 
-- [ ] **Step 2: Run the coverage tests**
+- [x] **Step 2: Run the coverage tests**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestParamSpaceCoverage -v`
 Expected: all 3 tests PASS.
 
 If `test_param_space_covers_every_numeric_field` fails with "missing bounds for ['<some-field>']", that means HeuristicConfig has a field this plan didn't anticipate. Add the missing field to PARAM_SPACE with a sensible bound and re-run.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git status -s  # verify only the new files are staged
@@ -338,7 +338,7 @@ git commit -m "feat(tuner): ParamSpace table covering all 48 numeric HeuristicCo
 **Files:**
 - Modify: `tests/test_heuristic_tuner.py`
 
-- [ ] **Step 1: Add round-trip tests to existing test file**
+- [x] **Step 1: Add round-trip tests to existing test file**
 
 Append to `tests/test_heuristic_tuner.py` after the `TestParamSpaceCoverage` class:
 
@@ -373,12 +373,12 @@ class TestEncodeDecodeRoundTrip:
             decode(np.zeros(5))
 ```
 
-- [ ] **Step 2: Run round-trip tests**
+- [x] **Step 2: Run round-trip tests**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestEncodeDecodeRoundTrip -v`
 Expected: all 3 tests PASS. (encode/decode were already written in Task 3 to support these.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git status -s
@@ -393,7 +393,7 @@ git commit -m "test(tuner): add encode/decode round-trip tests"
 **Files:**
 - Create: `src/tools/modal_tuner.py`
 
-- [ ] **Step 1: Add a failing test for `run_one_game`**
+- [x] **Step 1: Add a failing test for `run_one_game`**
 
 Append to `tests/test_heuristic_tuner.py`:
 
@@ -419,12 +419,12 @@ class TestRunOneGame:
             run_one_game(cfg_dict, opponent_name="not_a_real_opponent", seed=0)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestRunOneGame -v`
 Expected: ImportError on `from tools.modal_tuner import run_one_game`.
 
-- [ ] **Step 3: Create `src/tools/modal_tuner.py` with the run_one_game helper**
+- [x] **Step 3: Create `src/tools/modal_tuner.py` with the run_one_game helper**
 
 Create file with this content:
 
@@ -532,7 +532,7 @@ def run_one_game(cfg_dict: dict, opponent_name: str, seed: int) -> float:
     return float(last[0].reward) - float(last[1].reward)
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestRunOneGame -v`
 Expected: both tests PASS. The aggressive_swarm game should complete in ~3 seconds.
@@ -541,7 +541,7 @@ If the game test times out or returns NaN, check that:
 1. `kaggle_environments` is installed (`uv run python -c "import kaggle_environments"`).
 2. `orbit_wars.opponents.aggressive_swarm` exists and exports `agent`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git status -s
@@ -557,7 +557,7 @@ git commit -m "feat(tuner): run_one_game helper + opponent registry"
 - Modify: `src/tools/modal_tuner.py`
 - Modify: `tests/test_heuristic_tuner.py`
 
-- [ ] **Step 1: Add a failing test for evaluate_fitness_local with a tiny budget**
+- [x] **Step 1: Add a failing test for evaluate_fitness_local with a tiny budget**
 
 Append to `tests/test_heuristic_tuner.py`:
 
@@ -611,12 +611,12 @@ class TestEvaluateFitnessLocal:
         assert result["fitness"] == DISQUALIFIED_FITNESS
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestEvaluateFitnessLocal -v`
 Expected: ImportError on `evaluate_fitness_local` / `DISQUALIFIED_FITNESS`.
 
-- [ ] **Step 3: Add `evaluate_fitness_local` to `src/tools/modal_tuner.py`**
+- [x] **Step 3: Add `evaluate_fitness_local` to `src/tools/modal_tuner.py`**
 
 Append to `src/tools/modal_tuner.py` after the `run_one_game` function:
 
@@ -706,7 +706,7 @@ def evaluate_fitness_local(
     }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestEvaluateFitnessLocal -v --timeout=120`
 Expected: both tests PASS. The smoke test runs 4 sanity games + 4 fitness games = ~24 sec wall-clock.
@@ -715,7 +715,7 @@ If the test exceeds 120s, the games may be running slower than expected — chec
 Run: `time uv run python -c "from tools.modal_tuner import run_one_game; from dataclasses import fields; from orbit_wars.heuristic.config import HeuristicConfig; cfg={f.name:getattr(HeuristicConfig.default(),f.name) for f in fields(HeuristicConfig)}; print(run_one_game(cfg,'aggressive_swarm',0))"`
 Expected: completes in <5 seconds.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git status -s
@@ -730,7 +730,7 @@ git commit -m "feat(tuner): evaluate_fitness_local with sanity gate + fitness ph
 **Files:**
 - Modify: `src/tools/modal_tuner.py`
 
-- [ ] **Step 1: Add Modal image, app, and `evaluate_fitness` wrapper at the bottom of the file**
+- [x] **Step 1: Add Modal image, app, and `evaluate_fitness` wrapper at the bottom of the file**
 
 Append to `src/tools/modal_tuner.py`:
 
@@ -792,17 +792,17 @@ def evaluate_fitness(
     )
 ```
 
-- [ ] **Step 2: Verify the file imports cleanly (no Modal call yet)**
+- [x] **Step 2: Verify the file imports cleanly (no Modal call yet)**
 
 Run: `uv run python -c "from tools.modal_tuner import evaluate_fitness, app, tuner_image; print('Modal app:', app.name)"`
 Expected: prints `Modal app: orbit-wars-cma-tuner` with no errors.
 
-- [ ] **Step 3: Re-run the existing tests to ensure nothing broke**
+- [x] **Step 3: Re-run the existing tests to ensure nothing broke**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py -v --timeout=120`
 Expected: all tests still PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git status -s
@@ -817,7 +817,7 @@ git commit -m "feat(tuner): add Modal app + evaluate_fitness container wrapper"
 **Files:**
 - Modify: `src/tools/modal_tuner.py`
 
-- [ ] **Step 1: Add the `_log_generation` helper and `_choose_profile` function**
+- [x] **Step 1: Add the `_log_generation` helper and `_choose_profile` function**
 
 Append to `src/tools/modal_tuner.py` BEFORE the `# Modal app` section (so they're regular helpers, not Modal-decorated):
 
@@ -906,7 +906,7 @@ from tools.heuristic_tuner_param_space import (
 )
 ```
 
-- [ ] **Step 2: Add the `@app.local_entrypoint() main()` at the bottom of the file**
+- [x] **Step 2: Add the `@app.local_entrypoint() main()` at the bottom of the file**
 
 Append to `src/tools/modal_tuner.py`:
 
@@ -1111,7 +1111,7 @@ def main(
     print(f"  output dir       : {out_dir}")
 ```
 
-- [ ] **Step 3: Add the output writers as helpers near the top of the file (after `_winrate`)**
+- [x] **Step 3: Add the output writers as helpers near the top of the file (after `_winrate`)**
 
 Append after `_winrate` and before `evaluate_fitness_local`:
 
@@ -1214,12 +1214,12 @@ def _write_final_report(
     path.write_text(md)
 ```
 
-- [ ] **Step 4: Verify the file imports cleanly**
+- [x] **Step 4: Verify the file imports cleanly**
 
 Run: `uv run python -c "from tools.modal_tuner import main, evaluate_fitness, _choose_profile; print('OK')"`
 Expected: prints `OK`.
 
-- [ ] **Step 5: Test profile selection**
+- [x] **Step 5: Test profile selection**
 
 Run: `uv run python -c "from tools.modal_tuner import _choose_profile; print(_choose_profile('default', None, None, None))"`
 Expected: prints `(50, 15, 69, 54.0)`.
@@ -1227,12 +1227,12 @@ Expected: prints `(50, 15, 69, 54.0)`.
 Run: `uv run python -c "from tools.modal_tuner import _choose_profile; print(_choose_profile('smoke', None, None, None))"`
 Expected: prints `(4, 1, 4, 0.05)`.
 
-- [ ] **Step 6: Re-run all tests to ensure nothing broke**
+- [x] **Step 6: Re-run all tests to ensure nothing broke**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py -v --timeout=120`
 Expected: all tests still PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git status -s
@@ -1247,7 +1247,7 @@ git commit -m "feat(tuner): CMA-ES outer loop + output writers + profile presets
 **Files:**
 - Modify: `tests/test_heuristic_tuner.py`
 
-- [ ] **Step 1: Add a test that exercises the profile resolution + cost guard logic**
+- [x] **Step 1: Add a test that exercises the profile resolution + cost guard logic**
 
 Append to `tests/test_heuristic_tuner.py`:
 
@@ -1280,12 +1280,12 @@ class TestProfileAndCostGuard:
             _choose_profile("not_a_profile", None, None, None)
 ```
 
-- [ ] **Step 2: Run the new tests**
+- [x] **Step 2: Run the new tests**
 
 Run: `uv run pytest tests/test_heuristic_tuner.py::TestProfileAndCostGuard -v`
 Expected: all 4 tests PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git status -s
@@ -1299,14 +1299,14 @@ git commit -m "test(tuner): profile preset + cost-guard logic tests"
 
 **Files:** none modified
 
-- [ ] **Step 1: Run the full project pytest suite (catches accidental regressions in existing tests)**
+- [x] **Step 1: Run the full project pytest suite (catches accidental regressions in existing tests)**
 
 Run: `uv run pytest -q --timeout=120`
 Expected: all tests pass (existing 37 + new ones from this plan = ~50+).
 
 If any pre-existing test fails that was passing before, investigate before continuing — likely a circular import or an accidental change to a shared module.
 
-- [ ] **Step 2: Verify the Modal app inspects cleanly**
+- [x] **Step 2: Verify the Modal app inspects cleanly**
 
 Run: `uv run python -c "from tools.modal_tuner import app; print('App:', app.name); print('Functions:', list(app.registered_functions.keys()))"`
 
@@ -1316,7 +1316,7 @@ App: orbit-wars-cma-tuner
 Functions: ['evaluate_fitness']
 ```
 
-- [ ] **Step 3: Verify the modal CLI sees the file as a valid Modal app**
+- [x] **Step 3: Verify the modal CLI sees the file as a valid Modal app**
 
 Run: `uv run modal run src/tools/modal_tuner.py --help 2>&1 | head -30`
 
@@ -1329,7 +1329,7 @@ If `modal run FILE --help` doesn't show the entrypoint flags (depends on Modal S
 Run: `uv run python -c "import inspect; from tools.modal_tuner import main; print(inspect.signature(main))"`
 Expected: prints the signature of `main` showing all the CLI flags.
 
-- [ ] **Step 4: Commit (if any incidental fixes were needed; else skip)**
+- [x] **Step 4: Commit (if any incidental fixes were needed; else skip)**
 
 ```bash
 git status -s  # if clean, skip the commit
@@ -1341,17 +1341,19 @@ git status -s  # if clean, skip the commit
 
 **Files:** none modified — this is a manual verification task.
 
-- [ ] **Step 1: Confirm Modal auth and credit balance**
+- [x] **Step 1: Confirm Modal auth and credit balance**
 
-Run: `uv run modal token current`
+Run: `uv run modal token info`
 Expected: prints the user's Modal token info (NOT "no token configured"). If missing, instruct the user to run `uv run modal token new` interactively.
+
+(Note: the `modal token current` form was an error in an earlier draft of this plan — the correct CLI command is `modal token info`.)
 
 Run: `uv run modal app list 2>&1 | head -5`
 Expected: lists existing Modal apps OR prints "No deployed apps". Either is fine.
 
 **Ask the user to verify their Modal credit balance in the dashboard** (https://modal.com/settings/usage) BEFORE proceeding. The smoke run costs <$0.10 but you want to be sure they have at least $1 left.
 
-- [ ] **Step 2: Run the smoke profile**
+- [x] **Step 2: Run the smoke profile**
 
 Run: `uv run modal run src/tools/modal_tuner.py --smoke`
 
@@ -1367,7 +1369,7 @@ Expected behavior:
 
 If Modal can't import `orbit_wars.heuristic.config` inside the container, the `add_local_dir` path is wrong — check Task 7 step 1, the `local_path=` argument should resolve to the project's `src/` directory.
 
-- [ ] **Step 3: Inspect the smoke run output**
+- [x] **Step 3: Inspect the smoke run output**
 
 Run: `ls -la docs/research_documents/tuning_runs/`
 Expected: at least one timestamped directory.
@@ -1378,7 +1380,7 @@ Expected: a well-formed markdown report with fitness curve table.
 Run: `head -10 docs/research_documents/tuning_runs/*/best_config.py`
 Expected: a Python module importable with `from <path> import BEST`.
 
-- [ ] **Step 4: Verify the best_config.py is actually importable**
+- [x] **Step 4: Verify the best_config.py is actually importable**
 
 Find the most recent run dir, then test the import. Run as one shell command:
 
@@ -1395,7 +1397,7 @@ print(type(BEST).__name__, len(BEST.__dataclass_fields__))
 
 Expected: prints `HeuristicConfig 50` (50 = 48 numeric + 2 bool fields).
 
-- [ ] **Step 5: Commit any docs / output that the user wants in version control**
+- [x] **Step 5: Commit any docs / output that the user wants in version control**
 
 The output directory `docs/research_documents/tuning_runs/<timestamp>/` is generated artifact. The user may or may not want it committed. Check with the user before adding:
 
@@ -1413,7 +1415,7 @@ If user says yes, commit. If no, add to `.gitignore` (the `tuning_runs/` directo
 **Files:**
 - Modify: `src/tools/modal_tuner.py` (docstring updates only if needed)
 
-- [ ] **Step 1: Verify the module docstring is complete**
+- [x] **Step 1: Verify the module docstring is complete**
 
 Read the top of `src/tools/modal_tuner.py`. Confirm the docstring includes:
 - All 5 profile names + their (popsize, gens, games, cost) tuples
@@ -1422,7 +1424,7 @@ Read the top of `src/tools/modal_tuner.py`. Confirm the docstring includes:
 
 If anything is stale or wrong, update.
 
-- [ ] **Step 2: Print user-facing summary**
+- [x] **Step 2: Print user-facing summary**
 
 Print this summary to the user (in chat, not to a file):
 
@@ -1447,7 +1449,7 @@ Recommended next steps:
    per CLAUDE.md instructions, submit to Kaggle.
 ```
 
-- [ ] **Step 3: Mark all checklist items in this plan as complete**
+- [x] **Step 3: Mark all checklist items in this plan as complete**
 
 Edit this plan file: change `- [ ]` to `- [x]` for every step. Commit:
 
