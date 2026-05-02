@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 
+import numpy as np
 import pytest
 
 from orbit_wars.heuristic.config import HeuristicConfig
@@ -48,3 +49,32 @@ class TestParamSpaceCoverage:
             lower, upper, is_int = bounds
             assert lower < upper, f"{name}: lower ({lower}) must be < upper ({upper})"
             assert isinstance(is_int, bool), f"{name}: is_int must be bool"
+
+
+class TestEncodeDecodeRoundTrip:
+    def test_default_config_round_trips_exactly(self) -> None:
+        """encode(decode(encode(default))) == encode(default), per dim."""
+        cfg = HeuristicConfig.default()
+        x = encode(cfg)
+        cfg_round = decode(x)
+        x_round = encode(cfg_round)
+        np.testing.assert_array_almost_equal(x, x_round, decimal=6)
+
+    def test_decode_snaps_integer_fields_to_int(self) -> None:
+        """Integer fields decoded from non-integer floats must round to ints."""
+        from tools.heuristic_tuner_param_space import NUMERIC_FIELDS
+        x = encode(HeuristicConfig.default())
+        # Bump every field by 0.4 to force rounding for ints
+        x_perturbed = x + 0.4
+        cfg = decode(x_perturbed)
+        for i, name in enumerate(NUMERIC_FIELDS):
+            _, _, is_int = PARAM_SPACE[name]
+            value = getattr(cfg, name)
+            if is_int:
+                assert isinstance(value, int), f"{name}: expected int, got {type(value).__name__}"
+            else:
+                assert isinstance(value, float), f"{name}: expected float, got {type(value).__name__}"
+
+    def test_decode_rejects_wrong_shape(self) -> None:
+        with pytest.raises(ValueError, match="expected shape"):
+            decode(np.zeros(5))
