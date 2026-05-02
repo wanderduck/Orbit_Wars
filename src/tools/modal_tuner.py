@@ -25,17 +25,28 @@ Outputs to: docs/research_documents/tuning_runs/<UTC-ISO-timestamp>/
 
 from __future__ import annotations
 
-import json
-import random
 import sys
-import time
-from dataclasses import asdict
-from datetime import datetime, timezone
-from pathlib import Path
 
-import numpy as np
+# Modal container compatibility: when this module is loaded inside a Modal
+# container, the file lands at /root/modal_tuner.py and /app/src/ holds our
+# source tree (copied via .add_local_dir). /app/src is NOT on sys.path at
+# module-load time, so `from tools.X import Y` would fail before any function
+# body runs. Inserting /app/src here makes the import work in containers and
+# is a no-op locally (the path doesn't exist locally; tools is on sys.path
+# via the project install).
+if "/app/src" not in sys.path:
+    sys.path.insert(0, "/app/src")
 
-from tools.heuristic_tuner_param_space import (
+import json  # noqa: E402  (import after sys.path setup is intentional)
+import random  # noqa: E402
+import time  # noqa: E402
+from dataclasses import asdict  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from tools.heuristic_tuner_param_space import (  # noqa: E402
     INT_DIM_INDICES,
     NUMERIC_FIELDS,
     PARAM_SPACE,
