@@ -9,11 +9,16 @@ Architecture:
   popsize-many containers run in parallel.
 
 Run profiles (see CLI flags):
-    --smoke      popsize=4, gens=1, games=4         (~$0.05)
-    --iteration  popsize=20, gens=15, games=30      (~$8)
-    --default    popsize=50, gens=15, games=69      (~$54)  [no flag]
-    --extended   popsize=50, gens=30, games=69      (~$108)
-    --max-quality popsize=100, gens=30, games=100   (~$240)
+    --smoke      popsize=4, gens=1, games=4         (~$0.10)
+    --iteration  popsize=20, gens=15, games=30      (~$12)
+    --default    popsize=50, gens=15, games=69      (~$55)   [no flag]
+    --extended   popsize=50, gens=30, games=69      (~$110)
+    --max-quality popsize=100, gens=30, games=100   (~$285)
+
+Cost estimates updated 2026-05-02 after dropping peer_mdmahfuzsumon from
+FITNESS_OPPONENTS (saturated opponent — see code comments). Real Modal billing
+can run ~30-50% higher than these meter-based estimates due to container
+startup/idle overhead. Verify dashboard balance before each non-smoke run.
 
 Examples:
     uv run modal run src/tools/modal_tuner.py --smoke
@@ -126,14 +131,27 @@ def run_one_game(cfg_dict: dict, opponent_name: str, seed: int) -> float:
 # making the candidate strictly worse than any sanity-passing one.
 DISQUALIFIED_FITNESS: float = -1e9
 
-# Fitness opponent panel (matches spec § Fitness function)
-FITNESS_OPPONENTS: tuple[str, ...] = ("v15g_stock", "peer_mdmahfuzsumon")
+# Fitness opponent panel.
+#
+# DESIGN NOTE (post-iteration-sweep diagnostic): originally this was
+# {"v15g_stock": 0.6, "peer_mdmahfuzsumon": 0.4}, but spot-check (n=100/cell)
+# revealed peer_mdmahfuzsumon is fully saturated against the default agent —
+# default already wins 96% / margin +1.84, BEST-from-CMA-ES wins 97% / margin
+# +1.88. The "+0.04" delta vs peer was within noise, meaning 40% of the fitness
+# signal was a near-zero-information constraint. Dropping peer entirely
+# concentrates all CMA-ES gradient on the only opponent that actually
+# differentiates configs (v15g_stock self-play) and ~halves per-candidate
+# wall-clock. Peer regression is now guarded by the post-sweep spot-check
+# (see plan Step A), not by inclusion in the sanity gate — re-adding peer
+# at sanity_threshold=0.91 with 10 games would falsely fail ~0.5% of
+# default-equivalent candidates and still wouldn't catch subtle regressions.
+FITNESS_OPPONENTS: tuple[str, ...] = ("v15g_stock",)
 FITNESS_WEIGHTS: dict[str, float] = {
-    "v15g_stock": 0.6,
-    "peer_mdmahfuzsumon": 0.4,
+    "v15g_stock": 1.0,
 }
 
-# Sanity gate panel
+# Sanity gate panel — opponents that the agent must beat reliably to be a
+# coherent agent at all. Threshold is sanity_threshold (default 0.91).
 SANITY_OPPONENTS: tuple[str, ...] = ("aggressive_swarm", "defensive_turtle")
 
 
@@ -310,13 +328,18 @@ def evaluate_fitness_local(
 # CMA-ES outer loop helpers
 # ---------------------------------------------------------------------------
 
-# Profile presets: (popsize, generations, fitness_n_per_opponent, est_cost_usd)
+# Profile presets: (popsize, generations, fitness_n_per_opponent, est_cost_usd).
+# Cost estimates updated 2026-05-02 after observing 0% sanity-fail rate in the
+# first iteration sweep AND dropping peer_mdmahfuzsumon from FITNESS_OPPONENTS
+# (halves fitness-phase compute). Estimates are conservative; real Modal billing
+# can run ~30-50% higher due to container startup/idle overhead my cost meter
+# doesn't capture.
 PROFILES: dict[str, tuple[int, int, int, float]] = {
-    "smoke":       (4,   1,  4,   0.05),
-    "iteration":   (20,  15, 30,  8.0),
-    "default":     (50,  15, 69,  54.0),
-    "extended":    (50,  30, 69,  108.0),
-    "max-quality": (100, 30, 100, 240.0),
+    "smoke":       (4,   1,  4,   0.10),
+    "iteration":   (20,  15, 30,  12.0),
+    "default":     (50,  15, 69,  55.0),
+    "extended":    (50,  30, 69,  110.0),
+    "max-quality": (100, 30, 100, 285.0),
 }
 
 
@@ -338,16 +361,19 @@ def _choose_profile(
         generations = generations_override
     if fitness_games_override is not None:
         fitness_games = fitness_games_override
-    # Recompute estimated cost if any override applied
+    # Recompute estimated cost if any override applied.
+    # Per-passing-candidate sec = (sanity_n × n_sanity_opps + games × n_fitness_opps) × 3 sec/game
+    # Per-failing-candidate sec = ~60 sec (early-exit on first sanity opponent)
+    # We observed 0% sanity-fail rate post-fitness-fix, so model 0% fail
+    # (slightly over-estimates if some configs do fail, which is fine).
     if (popsize_override, generations_override, fitness_games_override) != (None, None, None):
-        # Per-passing-candidate compute: (sanity_n*2 + games*2) * 3 sec * 2 cores * $0.000131
-        # Per-failing-candidate: 1 min * 2 cores * $0.000131 = $0.0157
-        # Assume 50% pass rate
         sanity_n = 10
-        per_pass_sec = (sanity_n * 2 + fitness_games * 2) * 3
+        per_pass_sec = (
+            sanity_n * len(SANITY_OPPONENTS) + fitness_games * len(FITNESS_OPPONENTS)
+        ) * 3
         cost_per_pass = per_pass_sec * 2 * 0.000131
-        cost_per_fail = 60 * 2 * 0.000131
-        est_cost = generations * (popsize / 2) * (cost_per_pass + cost_per_fail)
+        # 0% sanity-fail rate observed in practice → use cost_per_pass for all
+        est_cost = generations * popsize * cost_per_pass
     return popsize, generations, fitness_games, est_cost
 
 

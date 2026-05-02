@@ -104,7 +104,10 @@ class TestRunOneGame:
 class TestEvaluateFitnessLocal:
     def test_local_smoke_returns_well_formed_dict(self) -> None:
         """Run a tiny budget end-to-end. Verify output dict has expected keys + types."""
-        from tools.modal_tuner import evaluate_fitness_local
+        from tools.modal_tuner import (
+            FITNESS_OPPONENTS,
+            evaluate_fitness_local,
+        )
 
         cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
                     for f in fields(HeuristicConfig)}
@@ -124,8 +127,8 @@ class TestEvaluateFitnessLocal:
         assert result["generation"] == 0
         assert isinstance(result["sanity_pass"], bool)
         assert isinstance(result["fitness"], float)
-        assert "v15g_stock" in result["per_opp"]
-        assert "peer_mdmahfuzsumon" in result["per_opp"]
+        # per_opp must contain exactly the configured fitness opponents
+        assert set(result["per_opp"].keys()) == set(FITNESS_OPPONENTS)
         # Sanity may early-exit on first failing opponent; only require at least one entry
         assert len(result["sanity_winrates"]) >= 1
 

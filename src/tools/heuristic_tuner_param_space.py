@@ -8,6 +8,15 @@ they're pinned at v1.5G defaults per the spec.
 Bound philosophy (from ParamSpace_meta.md): wide enough to let CMA-ES explore
 qualitatively different strategies, but constrained by gameplay sanity (e.g.
 min_launch >= 1; multipliers >= 0; turn-counters within episode length 500).
+
+REVISION 2026-05-02 (post-iteration-sweep): the first iteration sweep had 19
+of 48 fields land at a bound (40% bounds-pegging), strong evidence that the
+initial bounds were too conservative and CMA-ES was being constrained. 13
+lower bounds and 2 upper bounds widened in this revision. The 4 floor-pegged
+params at lower=0 (safety_margin, home_reserve, defense_buffer,
+reinforce_safety_margin) were left alone — those are natural floors (can't
+have negative ship counts or negative margins) and the optimizer landing on
+0 is informative, not constraining.
 """
 
 from __future__ import annotations
@@ -27,11 +36,12 @@ __all__ = [
     "validate_param_space",
 ]
 
-# (lower, upper, is_int) per field — 48 entries
+# (lower, upper, is_int) per field — 48 entries.
+# Comments mark fields whose bounds were widened in the 2026-05-02 revision.
 PARAM_SPACE: dict[str, tuple[float, float, bool]] = {
     # ----- Time horizons -----
-    "sim_horizon": (40, 200, True),
-    "route_search_horizon": (20, 120, True),
+    "sim_horizon": (20, 200, True),                  # was (40, 200) — widened lower
+    "route_search_horizon": (10, 120, True),         # was (20, 120) — widened lower
 
     # ----- Mission cost weights -----
     "attack_cost_turn_weight": (0.1, 1.5, False),
@@ -49,37 +59,37 @@ PARAM_SPACE: dict[str, tuple[float, float, bool]] = {
     "contested_neutral_value_mult": (0.2, 2.0, False),
     "early_neutral_value_mult": (0.3, 2.5, False),
     "comet_value_mult": (0.1, 2.0, False),
-    "reinforce_value_mult": (0.5, 3.0, False),
+    "reinforce_value_mult": (0.1, 3.0, False),       # was (0.5, 3.0) — widened lower
 
     # ----- Send margins -----
-    "safety_margin": (0, 5, True),
-    "home_reserve": (0, 10, True),
-    "min_launch": (5, 50, True),
-    "defense_buffer": (0, 8, True),
+    "safety_margin": (0, 5, True),                   # natural floor at 0
+    "home_reserve": (0, 10, True),                   # natural floor at 0
+    "min_launch": (1, 50, True),                     # was (5, 50) — widened lower (1-ship fleets allowed)
+    "defense_buffer": (0, 8, True),                  # natural floor at 0
 
     # ----- Endgame -----
-    "total_war_remaining_turns": (15, 100, True),
-    "late_remaining_turns": (20, 120, True),
-    "very_late_remaining_turns": (10, 60, True),
+    "total_war_remaining_turns": (5, 100, True),     # was (15, 100) — widened lower
+    "late_remaining_turns": (20, 200, True),         # was (20, 120) — widened upper
+    "very_late_remaining_turns": (3, 60, True),      # was (10, 60) — widened lower
     "late_immediate_ship_value": (0.1, 2.0, False),
     "elimination_bonus": (5.0, 40.0, False),
-    "weak_enemy_threshold": (10, 100, True),
+    "weak_enemy_threshold": (3, 100, True),          # was (10, 100) — widened lower
 
     # ----- Reinforce mission -----
-    "reinforce_min_production": (0, 10, True),
-    "reinforce_max_travel_turns": (5, 60, True),
-    "reinforce_safety_margin": (0, 8, True),
+    "reinforce_min_production": (0, 20, True),       # was (0, 10) — widened upper
+    "reinforce_max_travel_turns": (2, 60, True),     # was (5, 60) — widened lower
+    "reinforce_safety_margin": (0, 8, True),         # natural floor at 0
     "reinforce_max_source_fraction": (0.2, 0.95, False),
-    "reinforce_min_future_turns": (10, 100, True),
-    "reinforce_hold_lookahead": (5, 60, True),
+    "reinforce_min_future_turns": (3, 100, True),    # was (10, 100) — widened lower
+    "reinforce_hold_lookahead": (2, 60, True),       # was (5, 60) — widened lower
 
     # ----- Time budget -----
     "soft_act_deadline_fraction": (0.5, 0.95, False),
-    "heavy_route_planet_limit": (8, 80, True),
+    "heavy_route_planet_limit": (3, 80, True),       # was (8, 80) — widened lower
 
     # ----- Opening / phase markers -----
-    "early_turn_limit": (10, 100, True),
-    "opening_turn_limit": (30, 150, True),
+    "early_turn_limit": (3, 100, True),              # was (10, 100) — widened lower
+    "opening_turn_limit": (10, 150, True),           # was (30, 150) — widened lower
 
     # ----- Score multipliers -----
     "static_target_score_mult": (0.5, 2.5, False),
