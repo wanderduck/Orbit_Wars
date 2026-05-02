@@ -37,6 +37,9 @@ kaggle competitions submissions orbit-wars
 
 # Track ladder games for a specific submission (sample-size signal)
 uv run kaggle competitions episodes <subId> -v
+
+# Pull a public Kaggle notebook (full .ipynb source, no auth dance)
+uv run kaggle kernels pull <user>/<slug> -p <out_dir>
 ```
 
 Run tests: `uv run pytest -q` (37 tests; geometry/rotation/world combat resolution; uses `hypothesis` for property tests). Mark slow tests with `@pytest.mark.slow` and run via `-m slow`. Lint: `uv run ruff check src tests`. Type-check: `uv run ty check src` (config in `pyproject.toml`).
@@ -93,6 +96,12 @@ When the agent loses or behaves unexpectedly, **diagnose before fixing**. The to
 - `uv run python -m tools.trace_launch --seed 0 --target-type {static,orbiting,comet}` — picks specific launches and walks env.steps to find the fleet's actual trajectory and where it disappeared. Useful for verifying hypotheses before coding fixes.
 - For reproducible tournaments, set `random.seed(42)` ONCE before the seed loop. `random_agent` and env internals consume Python's global random state; per-seed reseeding gives different results than running 10 seeds straight. (env's own seed via `configuration={'seed': N}` is independent.)
 - **kaggle_environments quirk**: `env.run` calls agent functions via `inspect.signature` — closures with `*args, **kwargs` get called with NO args because the inspector sees 0 required params. Always use a real function with explicit `obs` parameter.
+
+## Workflow gotchas (single-developer + parallel tooling)
+
+- **`git commit` commits the staged INDEX, not just files you named.** `git add <specific files>` followed by `git commit -m "..."` will sweep in anything the user (or another tool) had pre-staged. Multiple Phase 1/2 commits silently included GitHub Desktop's pending stage. **Always run `git status -s` immediately before `git commit`**; if the index has unexpected files, `git reset HEAD <file>` to unstage them, then commit. Never use `git add -A` / `git add .` — name files explicitly.
+- **User runs GitHub Desktop in parallel.** Branch state, working-tree state, and stage contents can shift between turns without any prompt from the user. After any pause (skill invocations, long agent runs, usage-limit reset), re-check `git branch --show-current && git status -s` before assuming the world matches your last view. Don't blindly continue a multi-step git operation across pause boundaries.
+- **Subagents read reliably, write inconsistently.** `general-purpose` and `python3-development:codebase-analyzer` agents can Read project files fine, but Writing to nested project paths (especially `docs/research_documents/...`) has failed silently multiple times — they create doubled paths, write to `/tmp/`, or return success without the file actually appearing. Pattern that works: have subagents return findings INLINE in their reply text; the parent agent (this one) does all Write/Edit calls. Confirms with file_path:line_number after writing.
 
 ## Repo layout (only the non-obvious bits)
 
