@@ -82,6 +82,8 @@ The current agent (v1.5G) is a nearest-target sniper plus defense, with WorldMod
 - **No 4-player FFA-aware logic.** Agent treats all non-self planets as targets without considering kingmaker dynamics or alliance-of-convenience patterns.
 - **No multi-source coordination.** Each owned planet picks a target independently; no swarm mission (E6 pattern).
 - **`uv.lock` pins large CUDA/RAPIDS stack** — `uv sync` is slow (~minutes). The agent itself doesn't need GPU; it's there for the v2+ RL scaffold (currently stubs in `src/orbit_wars/rl/`).
+- **Env consumes Python's global random state — cross-script A/B comparisons are INVALID.** Same `configuration={'seed': N}` produces *different* game outcomes depending on what position-in-stream the game runs at, because env internals consume from `random` between turns. Phase 2 Step 4 surfaced this concretely: the same `HeuristicConfig.default()` got 98% in a 2-variant script and 93% in a 4-variant script vs the same opponent on the same env seeds. **Within-script comparisons remain valid** (matched random-stream positions). For any future A/B: run all variants in the same script, alternating per seed. Don't compare winrates across separately-launched scripts.
+- **2-variant gates can be misleading; prefer multi-variant ablation.** Step 4's 2-variant gate said "passes" (98% vs 98%, Δ=0). The 4-variant ablation revealed the bundle's pincer toggle was -5% standalone — hidden because the 2-variant comparison happened to show two configs that were equally bad in different ways. When investigating a bundle of N changes, run N+1-variant ablation (control + each toggle individually).
 
 ## Diagnostics & debugging
 
