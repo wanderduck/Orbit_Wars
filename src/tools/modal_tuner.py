@@ -93,3 +93,88 @@ def run_one_game(cfg_dict: dict, opponent_name: str, seed: int) -> float:
     env.run([me, opponent_fn])
     last = env.steps[-1]
     return float(last[0].reward) - float(last[1].reward)
+
+
+# Sentinel returned when a candidate fails the sanity gate.
+# Large negative — CMA-ES is minimizing -fitness, so this maps to +1e9 cost,
+# making the candidate strictly worse than any sanity-passing one.
+DISQUALIFIED_FITNESS: float = -1e9
+
+# Fitness opponent panel (matches spec § Fitness function)
+FITNESS_OPPONENTS: tuple[str, ...] = ("v15g_stock", "peer_mdmahfuzsumon")
+FITNESS_WEIGHTS: dict[str, float] = {
+    "v15g_stock": 0.6,
+    "peer_mdmahfuzsumon": 0.4,
+}
+
+# Sanity gate panel
+SANITY_OPPONENTS: tuple[str, ...] = ("aggressive_swarm", "defensive_turtle")
+
+
+def _winrate(margins: list[float]) -> float:
+    """Fraction of games with margin > 0 (strict win, ties don't count)."""
+    if not margins:
+        return 0.0
+    wins = sum(1 for m in margins if m > 0)
+    return wins / len(margins)
+
+
+def evaluate_fitness_local(
+    cfg_dict: dict,
+    candidate_id: int,
+    generation: int,
+    sanity_n_per_opponent: int = 10,
+    fitness_n_per_opponent: int = 69,
+    sanity_threshold: float = 0.91,
+) -> dict:
+    """Run sanity gate, then fitness games for one candidate. Pure Python; no Modal.
+
+    Reseeds Python's global random state once at entry so games are reproducible
+    across containers (each container is its own fresh process, so this gives
+    every candidate identical RNG consumption per generation).
+    """
+    random.seed(GLOBAL_TUNER_SEED)
+    started = time.time()
+
+    # ----- Sanity gate -----
+    sanity_winrates: dict[str, float] = {}
+    sanity_pass = True
+    for opp in SANITY_OPPONENTS:
+        margins = [run_one_game(cfg_dict, opp, seed=s)
+                   for s in range(sanity_n_per_opponent)]
+        wr = _winrate(margins)
+        sanity_winrates[opp] = wr
+        if wr < sanity_threshold:
+            sanity_pass = False
+            # Early exit: don't run remaining sanity opponents OR fitness phase
+            break
+
+    if not sanity_pass:
+        return {
+            "candidate_id": candidate_id,
+            "generation": generation,
+            "sanity_pass": False,
+            "fitness": DISQUALIFIED_FITNESS,
+            "per_opp": dict.fromkeys(FITNESS_OPPONENTS, 0.0),
+            "sanity_winrates": sanity_winrates,
+            "wall_clock_seconds": time.time() - started,
+        }
+
+    # ----- Fitness phase -----
+    per_opp: dict[str, float] = {}
+    for opp in FITNESS_OPPONENTS:
+        margins = [run_one_game(cfg_dict, opp, seed=s)
+                   for s in range(fitness_n_per_opponent)]
+        per_opp[opp] = sum(margins) / len(margins)
+
+    fitness = sum(FITNESS_WEIGHTS[opp] * per_opp[opp] for opp in FITNESS_OPPONENTS)
+
+    return {
+        "candidate_id": candidate_id,
+        "generation": generation,
+        "sanity_pass": True,
+        "fitness": float(fitness),
+        "per_opp": per_opp,
+        "sanity_winrates": sanity_winrates,
+        "wall_clock_seconds": time.time() - started,
+    }

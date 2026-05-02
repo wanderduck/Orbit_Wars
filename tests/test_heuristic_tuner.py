@@ -99,3 +99,52 @@ class TestRunOneGame:
                     for f in fields(HeuristicConfig)}
         with pytest.raises(KeyError):
             run_one_game(cfg_dict, opponent_name="not_a_real_opponent", seed=0)
+
+
+class TestEvaluateFitnessLocal:
+    def test_local_smoke_returns_well_formed_dict(self) -> None:
+        """Run a tiny budget end-to-end. Verify output dict has expected keys + types."""
+        from tools.modal_tuner import evaluate_fitness_local
+
+        cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
+                    for f in fields(HeuristicConfig)}
+        result = evaluate_fitness_local(
+            cfg_dict=cfg_dict,
+            candidate_id=0,
+            generation=0,
+            sanity_n_per_opponent=2,
+            fitness_n_per_opponent=2,
+            sanity_threshold=0.91,
+        )
+        # Required keys per spec Architecture/Modal-function section
+        for key in ("candidate_id", "generation", "sanity_pass", "fitness",
+                    "per_opp", "sanity_winrates", "wall_clock_seconds"):
+            assert key in result, f"missing key {key!r} in result"
+        assert result["candidate_id"] == 0
+        assert result["generation"] == 0
+        assert isinstance(result["sanity_pass"], bool)
+        assert isinstance(result["fitness"], float)
+        assert "v15g_stock" in result["per_opp"]
+        assert "peer_mdmahfuzsumon" in result["per_opp"]
+        # Sanity may early-exit on first failing opponent; only require at least one entry
+        assert len(result["sanity_winrates"]) >= 1
+
+    def test_local_disqualifies_obviously_bad_config(self) -> None:
+        """A clearly broken config (min_launch=999, can never afford to launch) should
+        fail sanity and return fitness == DISQUALIFIED_FITNESS."""
+        from tools.modal_tuner import DISQUALIFIED_FITNESS, evaluate_fitness_local
+
+        cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
+                    for f in fields(HeuristicConfig)}
+        cfg_dict["min_launch"] = 999  # can't ever launch — will lose every game
+
+        result = evaluate_fitness_local(
+            cfg_dict=cfg_dict,
+            candidate_id=99,
+            generation=0,
+            sanity_n_per_opponent=2,
+            fitness_n_per_opponent=2,
+            sanity_threshold=0.91,
+        )
+        assert result["sanity_pass"] is False
+        assert result["fitness"] == DISQUALIFIED_FITNESS
