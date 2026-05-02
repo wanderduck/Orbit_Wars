@@ -396,6 +396,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cma"
+version = "4.4.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/ac/8c27720838e293898671f01b5c452236a0c74f4799a3f2d5fcccbbf50d71/cma-4.4.4.tar.gz", hash = "sha256:632bd654b5dce04c0eaa3166679d3e4773ce7a79eab7934e7f363c341b9a8170", size = 316645, upload-time = "2026-02-25T22:18:16Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/d4/ec46cedab6a6145e21768baa8110db3e2e836a320d8499e4ef18bc894e61/cma-4.4.4-py3-none-any.whl", hash = "sha256:edb6d02eb2aac2d54650f16a8f0c70711ff17445957de7c9de92ff7fd4b7ef38", size = 328311, upload-time = "2026-02-25T22:18:09.602Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -3267,6 +3279,7 @@ name = "orbit-wars"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cma" },
     { name = "cucim-cu12" },
     { name = "cudf-cu12" },
     { name = "cugraph-cu12" },
@@ -3283,6 +3296,7 @@ dependencies = [
     { name = "kaggle-environments" },
     { name = "kagglehub" },
     { name = "matplotlib" },
+    { name = "modal" },
     { name = "numpy" },
     { name = "nx-cugraph-cu12" },
     { name = "pandas" },
@@ -3312,6 +3326,7 @@ remote = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cma", specifier = ">=3.3.0" },
     { name = "cucim-cu12", specifier = "==26.2.*" },
     { name = "cudf-cu12", specifier = "==26.2.*" },
     { name = "cugraph-cu12", specifier = "==26.2.*" },
@@ -3328,6 +3343,7 @@ requires-dist = [
     { name = "kaggle-environments", specifier = ">=1.28.1" },
     { name = "kagglehub", specifier = ">=1.0.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "modal", specifier = ">=1.4.2" },
     { name = "modal", marker = "extra == 'remote'", specifier = ">=0.69.0" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "nx-cugraph-cu12", specifier = "==26.2.*" },

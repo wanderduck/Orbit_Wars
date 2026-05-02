@@ -40,6 +40,8 @@ dependencies = [
     "ruff>=0.15.12",
     "ty>=0.0.33",
     "pyyaml>=6.0.3",
+    "modal>=1.4.2",
+    "cma>=3.3.0",
 ]
 
 [project.optional-dependencies]
