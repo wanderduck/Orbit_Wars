@@ -17,3 +17,7 @@ __pycache__/
 # Worktrees (if any are created by orchestration runs)
 .worktrees/
 _research_workspace/
+
+# CMA-ES tuning run outputs (generated per-run; user can git add specific
+# runs they want to preserve, but default is to ignore)
+docs/research_documents/tuning_runs/
