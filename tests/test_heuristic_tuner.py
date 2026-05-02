@@ -148,3 +148,36 @@ class TestEvaluateFitnessLocal:
         )
         assert result["sanity_pass"] is False
         assert result["fitness"] == DISQUALIFIED_FITNESS
+
+
+class TestProfileAndCostGuard:
+    def test_smoke_profile_under_cost_threshold(self) -> None:
+        from tools.modal_tuner import _choose_profile
+        pop, gens, games, cost = _choose_profile("smoke", None, None, None)
+        assert pop == 4 and gens == 1 and games == 4
+        assert cost < 1.0
+
+    def test_default_profile_at_expected_cost(self) -> None:
+        from tools.modal_tuner import _choose_profile
+        pop, gens, games, cost = _choose_profile("default", None, None, None)
+        assert pop == 50 and gens == 15 and games == 69
+        assert 40.0 <= cost <= 70.0  # ~$54 plus tolerance
+
+    def test_overrides_recompute_cost(self) -> None:
+        from tools.modal_tuner import _choose_profile
+        # Override popsize down → cost should drop proportionally
+        _, _, _, default_cost = _choose_profile("default", None, None, None)
+        _, _, _, half_cost = _choose_profile(
+            "default",
+            popsize_override=25,
+            generations_override=None,
+            fitness_games_override=None,
+        )
+        # Note: cost recompute formula uses 50% sanity-pass model so it may not be exactly half;
+        # but it should be meaningfully smaller.
+        assert half_cost < default_cost * 0.7
+
+    def test_unknown_profile_raises(self) -> None:
+        from tools.modal_tuner import _choose_profile
+        with pytest.raises(ValueError, match="Unknown profile"):
+            _choose_profile("not_a_profile", None, None, None)
