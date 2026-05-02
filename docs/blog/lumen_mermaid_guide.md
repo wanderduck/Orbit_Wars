@@ -1,6 +1,4 @@
-# Mermaid: a deep dive into diagrams that don't rot
-
-*Working title — final title decided after the full draft is locked.*
+# Floundering with Mermaid? A Sea-Deep Dive into Diagramming and Smooth Sailing Syntax
 
 ## §1 — The Confluence problem
 
