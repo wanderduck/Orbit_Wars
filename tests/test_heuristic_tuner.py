@@ -78,3 +78,24 @@ class TestEncodeDecodeRoundTrip:
     def test_decode_rejects_wrong_shape(self) -> None:
         with pytest.raises(ValueError, match="expected shape"):
             decode(np.zeros(5))
+
+
+class TestRunOneGame:
+    def test_run_one_game_returns_finite_margin(self) -> None:
+        """Run one game (default cfg vs aggressive_swarm, seed=0). Margin should be finite."""
+        from tools.modal_tuner import run_one_game
+
+        cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
+                    for f in fields(HeuristicConfig)}
+        margin = run_one_game(cfg_dict, opponent_name="aggressive_swarm", seed=0)
+        # In Orbit Wars, reward margin is typically -1, 0, or +1 (sometimes float)
+        assert isinstance(margin, float)
+        assert -10.0 <= margin <= 10.0, f"margin {margin} outside sanity range"
+
+    def test_run_one_game_unknown_opponent_raises(self) -> None:
+        from tools.modal_tuner import run_one_game
+
+        cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
+                    for f in fields(HeuristicConfig)}
+        with pytest.raises(KeyError):
+            run_one_game(cfg_dict, opponent_name="not_a_real_opponent", seed=0)
