@@ -164,7 +164,8 @@ class TestProfileAndCostGuard:
         from tools.modal_tuner import _choose_profile
         pop, gens, games, cost = _choose_profile("default", None, None, None)
         assert pop == 50 and gens == 15 and games == 69
-        assert 40.0 <= cost <= 70.0  # ~$54 plus tolerance
+        # ~$130 with archive included; tolerance for either side
+        assert 100.0 <= cost <= 160.0
 
     def test_overrides_recompute_cost(self) -> None:
         from tools.modal_tuner import _choose_profile
@@ -184,3 +185,82 @@ class TestProfileAndCostGuard:
         from tools.modal_tuner import _choose_profile
         with pytest.raises(ValueError, match="Unknown profile"):
             _choose_profile("not_a_profile", None, None, None)
+
+
+class TestRollingArchive:
+    def test_avg_archive_size_warmup(self) -> None:
+        """During warmup (first interval gens), archive is empty."""
+        from tools.modal_tuner import _avg_archive_size_during_run
+        # 3 gens, interval=3, max=3 → all warmup → avg = 0
+        assert _avg_archive_size_during_run(3, 3, 3) == 0.0
+
+    def test_avg_archive_size_filled_run(self) -> None:
+        """For a long run, archive saturates at max_size for most gens."""
+        from tools.modal_tuner import _avg_archive_size_during_run
+        # 30 gens, interval=3, max=3:
+        # gens 0-2: 0, 3-5: 1, 6-8: 2, 9-29: 3 (cap)
+        # total = 0+0+0+1+1+1+2+2+2+(21*3) = 9+63 = 72; avg = 72/30 = 2.4
+        avg = _avg_archive_size_during_run(30, 3, 3)
+        assert abs(avg - 2.4) < 0.01
+
+    def test_avg_archive_size_default_profile(self) -> None:
+        """For default profile (15 gens, interval=3, max=3): avg ~1.8."""
+        from tools.modal_tuner import _avg_archive_size_during_run
+        # gens 0-2: 0, 3-5: 1, 6-8: 2, 9-14: 3 → total = 0+0+0+1+1+1+2+2+2+3+3+3+3+3+3 = 27
+        # avg = 27/15 = 1.8
+        avg = _avg_archive_size_during_run(15, 3, 3)
+        assert abs(avg - 1.8) < 0.01
+
+    def test_evaluate_fitness_local_with_archive(self) -> None:
+        """evaluate_fitness_local accepts archive_opponents and includes them in per_opp."""
+        from tools.modal_tuner import (
+            ANCHOR_WEIGHT,
+            ARCHIVE_WEIGHT_TOTAL,
+            FITNESS_ANCHOR,
+            evaluate_fitness_local,
+        )
+
+        cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
+                    for f in fields(HeuristicConfig)}
+        # Use a 2nd config (slight tweak) as archive entry
+        archive_cfg = dict(cfg_dict)
+        archive_cfg["min_launch"] = 30  # different from default's 20
+
+        archive_opponents = [
+            {"name": "archive_test_0", "cfg_dict": archive_cfg},
+        ]
+        result = evaluate_fitness_local(
+            cfg_dict=cfg_dict,
+            candidate_id=0,
+            generation=10,
+            sanity_n_per_opponent=2,
+            fitness_n_per_opponent=2,
+            sanity_threshold=0.91,
+            archive_opponents=archive_opponents,
+        )
+        # per_opp must contain anchor + each archive entry
+        assert FITNESS_ANCHOR in result["per_opp"]
+        assert "archive_test_0" in result["per_opp"]
+        # Sanity check on weight math: with one archive entry, anchor weight + archive weight = 1
+        # (we don't verify the exact arithmetic since it depends on ANCHOR_WEIGHT/ARCHIVE_WEIGHT_TOTAL)
+        assert ANCHOR_WEIGHT + ARCHIVE_WEIGHT_TOTAL == pytest.approx(1.0)
+
+    def test_evaluate_fitness_local_no_archive_backward_compat(self) -> None:
+        """When archive_opponents is None, fitness equals anchor margin (full weight)."""
+        from tools.modal_tuner import FITNESS_ANCHOR, evaluate_fitness_local
+
+        cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
+                    for f in fields(HeuristicConfig)}
+        result = evaluate_fitness_local(
+            cfg_dict=cfg_dict,
+            candidate_id=0,
+            generation=0,
+            sanity_n_per_opponent=2,
+            fitness_n_per_opponent=2,
+            sanity_threshold=0.91,
+            archive_opponents=None,
+        )
+        # No archive → only anchor in per_opp
+        assert set(result["per_opp"].keys()) == {FITNESS_ANCHOR}
+        # fitness should equal anchor margin (since weight is 1.0)
+        assert result["fitness"] == pytest.approx(result["per_opp"][FITNESS_ANCHOR])

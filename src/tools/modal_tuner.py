@@ -126,33 +126,63 @@ def run_one_game(cfg_dict: dict, opponent_name: str, seed: int) -> float:
     return float(last[0].reward) - float(last[1].reward)
 
 
+def run_one_game_vs_config(
+    cfg_dict_us: dict, cfg_dict_opp: dict, seed: int,
+) -> float:
+    """Run one game between two HeuristicConfig instances. Used for archive matchups.
+
+    Both sides are our heuristic agent, just with different configs. Returns
+    reward margin (us - opponent). Same env-seed semantics as run_one_game.
+    """
+    from kaggle_environments import make
+
+    me = make_configured_agent(cfg_dict_us)
+    opp = make_configured_agent(cfg_dict_opp)
+
+    env = make("orbit_wars", configuration={"seed": seed}, debug=False)
+    env.run([me, opp])
+    last = env.steps[-1]
+    return float(last[0].reward) - float(last[1].reward)
+
+
 # Sentinel returned when a candidate fails the sanity gate.
 # Large negative — CMA-ES is minimizing -fitness, so this maps to +1e9 cost,
 # making the candidate strictly worse than any sanity-passing one.
 DISQUALIFIED_FITNESS: float = -1e9
 
-# Fitness opponent panel.
-#
-# DESIGN NOTE (post-iteration-sweep diagnostic): originally this was
-# {"v15g_stock": 0.6, "peer_mdmahfuzsumon": 0.4}, but spot-check (n=100/cell)
-# revealed peer_mdmahfuzsumon is fully saturated against the default agent —
-# default already wins 96% / margin +1.84, BEST-from-CMA-ES wins 97% / margin
-# +1.88. The "+0.04" delta vs peer was within noise, meaning 40% of the fitness
-# signal was a near-zero-information constraint. Dropping peer entirely
-# concentrates all CMA-ES gradient on the only opponent that actually
-# differentiates configs (v15g_stock self-play) and ~halves per-candidate
-# wall-clock. Peer regression is now guarded by the post-sweep spot-check
-# (see plan Step A), not by inclusion in the sanity gate — re-adding peer
-# at sanity_threshold=0.91 with 10 games would falsely fail ~0.5% of
-# default-equivalent candidates and still wouldn't catch subtle regressions.
-FITNESS_OPPONENTS: tuple[str, ...] = ("v15g_stock",)
-FITNESS_WEIGHTS: dict[str, float] = {
-    "v15g_stock": 1.0,
-}
+# Fitness anchor — the always-present "don't regress against current production"
+# opponent. v15g_stock is "our agent with default config" (self-play asymmetry).
+# Earlier had a fixed multi-opponent panel, but spot-check revealed all our
+# local opponents are saturated against default (94-100% winrate) — only
+# v15g_stock self-play differentiates. Lock it as the anchor; archive entries
+# (see ROLLING ARCHIVE below) provide the diversity that local opponents can't.
+FITNESS_ANCHOR: str = "v15g_stock"
 
-# Sanity gate panel — opponents that the agent must beat reliably to be a
-# coherent agent at all. Threshold is sanity_threshold (default 0.91).
+# Sanity gate panel — opponents the agent must beat reliably to be coherent.
+# Threshold is sanity_threshold (default 0.91).
 SANITY_OPPONENTS: tuple[str, ...] = ("aggressive_swarm", "defensive_turtle")
+
+# ----- Rolling-archive co-evolution (Path G; spec Phase 3.5) -----
+#
+# Every ARCHIVE_UPDATE_INTERVAL generations, the current best-so-far config is
+# appended to the archive. From then on, fitness includes "did this candidate
+# beat the past archive entries?" alongside the v15g_stock anchor.
+#
+# Why: BEST_v2 hit 614 μ on ladder despite +1.12 margin vs default locally
+# because all our local opponents are saturated. With archive entries, CMA-ES
+# has to keep beating its own evolving best, which provides naturally-
+# adversarial diversity that fixed local opponents cannot.
+#
+# Weight scheme: anchor takes ANCHOR_WEIGHT, archive entries equally share
+# ARCHIVE_WEIGHT_TOTAL. With archive_size=N: weight_per_archive = 0.5/N.
+ARCHIVE_MAX_SIZE: int = 3            # FIFO eviction beyond this
+ARCHIVE_UPDATE_INTERVAL: int = 3     # generations between archive appends
+ANCHOR_WEIGHT: float = 0.5           # v15g_stock weight (always)
+ARCHIVE_WEIGHT_TOTAL: float = 0.5    # split equally across archive entries
+
+# Backward-compat shim — old callers still reference these
+FITNESS_OPPONENTS: tuple[str, ...] = (FITNESS_ANCHOR,)
+FITNESS_WEIGHTS: dict[str, float] = {FITNESS_ANCHOR: 1.0}
 
 
 def _winrate(margins: list[float]) -> float:
@@ -270,8 +300,17 @@ def evaluate_fitness_local(
     sanity_n_per_opponent: int = 10,
     fitness_n_per_opponent: int = 69,
     sanity_threshold: float = 0.91,
+    archive_opponents: list[dict] | None = None,
 ) -> dict:
     """Run sanity gate, then fitness games for one candidate. Pure Python; no Modal.
+
+    `archive_opponents`, when provided, is a list of dicts each with keys
+    {"name": str, "cfg_dict": dict}. These represent past best configs used
+    for rolling-archive co-evolution. The candidate plays against:
+        - the FITNESS_ANCHOR (v15g_stock) at weight ANCHOR_WEIGHT
+        - each archive entry, sharing ARCHIVE_WEIGHT_TOTAL equally
+    When `archive_opponents` is None or empty, falls back to anchor-only
+    fitness with weight 1.0 (backward-compat with iteration v2 behavior).
 
     Reseeds Python's global random state once at entry so games are reproducible
     across containers (each container is its own fresh process, so this gives
@@ -279,6 +318,7 @@ def evaluate_fitness_local(
     """
     random.seed(GLOBAL_TUNER_SEED)
     started = time.time()
+    archive_opponents = archive_opponents or []
 
     # ----- Sanity gate -----
     sanity_winrates: dict[str, float] = {}
@@ -294,24 +334,45 @@ def evaluate_fitness_local(
             break
 
     if not sanity_pass:
+        empty_per_opp = {FITNESS_ANCHOR: 0.0}
+        for arch in archive_opponents:
+            empty_per_opp[arch["name"]] = 0.0
         return {
             "candidate_id": candidate_id,
             "generation": generation,
             "sanity_pass": False,
             "fitness": DISQUALIFIED_FITNESS,
-            "per_opp": dict.fromkeys(FITNESS_OPPONENTS, 0.0),
+            "per_opp": empty_per_opp,
             "sanity_winrates": sanity_winrates,
             "wall_clock_seconds": time.time() - started,
         }
 
-    # ----- Fitness phase -----
+    # ----- Fitness phase: anchor + (optional) archive -----
     per_opp: dict[str, float] = {}
-    for opp in FITNESS_OPPONENTS:
-        margins = [run_one_game(cfg_dict, opp, seed=s)
-                   for s in range(fitness_n_per_opponent)]
-        per_opp[opp] = sum(margins) / len(margins)
 
-    fitness = sum(FITNESS_WEIGHTS[opp] * per_opp[opp] for opp in FITNESS_OPPONENTS)
+    # Anchor (always present)
+    anchor_margins = [run_one_game(cfg_dict, FITNESS_ANCHOR, seed=s)
+                      for s in range(fitness_n_per_opponent)]
+    per_opp[FITNESS_ANCHOR] = sum(anchor_margins) / len(anchor_margins)
+
+    # Archive entries (config-vs-config matchups)
+    for arch in archive_opponents:
+        margins = [run_one_game_vs_config(cfg_dict, arch["cfg_dict"], seed=s)
+                   for s in range(fitness_n_per_opponent)]
+        per_opp[arch["name"]] = sum(margins) / len(margins)
+
+    # Compute weighted fitness
+    if archive_opponents:
+        anchor_w = ANCHOR_WEIGHT
+        archive_w_each = ARCHIVE_WEIGHT_TOTAL / len(archive_opponents)
+    else:
+        # No archive yet → anchor takes full weight
+        anchor_w = 1.0
+        archive_w_each = 0.0
+
+    fitness = anchor_w * per_opp[FITNESS_ANCHOR]
+    for arch in archive_opponents:
+        fitness += archive_w_each * per_opp[arch["name"]]
 
     return {
         "candidate_id": candidate_id,
@@ -329,18 +390,27 @@ def evaluate_fitness_local(
 # ---------------------------------------------------------------------------
 
 # Profile presets: (popsize, generations, fitness_n_per_opponent, est_cost_usd).
-# Cost estimates updated 2026-05-02 after observing 0% sanity-fail rate in the
-# first iteration sweep AND dropping peer_mdmahfuzsumon from FITNESS_OPPONENTS
-# (halves fitness-phase compute). Estimates are conservative; real Modal billing
-# can run ~30-50% higher due to container startup/idle overhead my cost meter
-# doesn't capture.
+# Estimates updated 2026-05-02 (rolling archive added). Effective opponent count
+# grows from 1 (anchor only, gens 0..K-1) to 1+M (anchor + max archive) over a
+# run, averaging ~2.8 fitness opponents per candidate for the default profile.
+# These meter-based numbers run ~4-5x HIGHER than actual Modal billing per the
+# user's dashboard — so divide by 4-5 for real $$$.
 PROFILES: dict[str, tuple[int, int, int, float]] = {
     "smoke":       (4,   1,  4,   0.10),
-    "iteration":   (20,  15, 30,  12.0),
-    "default":     (50,  15, 69,  55.0),
-    "extended":    (50,  30, 69,  110.0),
-    "max-quality": (100, 30, 100, 285.0),
+    "iteration":   (20,  15, 30,  25.0),
+    "default":     (50,  15, 69,  130.0),
+    "extended":    (50,  30, 69,  300.0),
+    "max-quality": (100, 30, 100, 850.0),
 }
+
+
+def _avg_archive_size_during_run(generations: int, interval: int, max_size: int) -> float:
+    """Average archive size over a run, accounting for warmup + FIFO cap."""
+    total = 0
+    for g in range(generations):
+        # archive_at_eval(g) = min(g // interval, max_size)
+        total += min(g // interval, max_size)
+    return total / generations if generations > 0 else 0.0
 
 
 def _choose_profile(
@@ -368,8 +438,13 @@ def _choose_profile(
     # (slightly over-estimates if some configs do fail, which is fine).
     if (popsize_override, generations_override, fitness_games_override) != (None, None, None):
         sanity_n = 10
+        # Effective fitness opponents = 1 (anchor) + average archive size
+        avg_archive = _avg_archive_size_during_run(
+            generations, ARCHIVE_UPDATE_INTERVAL, ARCHIVE_MAX_SIZE,
+        )
+        avg_fitness_opps = 1.0 + avg_archive
         per_pass_sec = (
-            sanity_n * len(SANITY_OPPONENTS) + fitness_games * len(FITNESS_OPPONENTS)
+            sanity_n * len(SANITY_OPPONENTS) + fitness_games * avg_fitness_opps
         ) * 3
         cost_per_pass = per_pass_sec * 2 * 0.000131
         # 0% sanity-fail rate observed in practice → use cost_per_pass for all
@@ -432,7 +507,7 @@ app = modal.App("orbit-wars-cma-tuner", image=tuner_image)
     image=tuner_image,
     cpu=2.0,
     memory=4096,
-    timeout=20 * MINUTES,
+    timeout=30 * MINUTES,  # raised from 20 — archive games multiply per-cand wall-clock
 )
 def evaluate_fitness(
     cfg_dict: dict,
@@ -441,6 +516,7 @@ def evaluate_fitness(
     sanity_n_per_opponent: int,
     fitness_n_per_opponent: int,
     sanity_threshold: float,
+    archive_opponents: list[dict] | None = None,
 ) -> dict:
     """Modal-side wrapper: ensures src/ is on sys.path, then delegates."""
     import sys as _sys
@@ -453,6 +529,7 @@ def evaluate_fitness(
         sanity_n_per_opponent=sanity_n_per_opponent,
         fitness_n_per_opponent=fitness_n_per_opponent,
         sanity_threshold=sanity_threshold,
+        archive_opponents=archive_opponents,
     )
 
 
@@ -543,8 +620,11 @@ def main(
         "fitness_games_per_opponent": fit_games,
         "sanity_n_per_opponent": sanity_n_per_opponent,
         "sanity_threshold": sanity_threshold,
-        "fitness_weights": FITNESS_WEIGHTS,
-        "fitness_opponents": list(FITNESS_OPPONENTS),
+        "fitness_anchor": FITNESS_ANCHOR,
+        "anchor_weight": ANCHOR_WEIGHT,
+        "archive_max_size": ARCHIVE_MAX_SIZE,
+        "archive_update_interval": ARCHIVE_UPDATE_INTERVAL,
+        "archive_weight_total": ARCHIVE_WEIGHT_TOTAL,
         "sanity_opponents": list(SANITY_OPPONENTS),
         "param_space": {n: list(b) for n, b in PARAM_SPACE.items()},
         "baseline_config": asdict(HeuristicConfig.default()),
@@ -554,23 +634,33 @@ def main(
     }
     (out_dir / "config.json").write_text(json.dumps(config_blob, indent=2))
 
-    # 6. CMA-ES loop
+    # 6. CMA-ES loop with rolling archive
     best_fitness_so_far = float("-inf")
     best_cfg_dict_so_far: dict | None = None
     best_per_opp_so_far: dict | None = None
     accumulated_cost = 0.0
     gen_log_path = out_dir / "generations.jsonl"
+    archive: list[dict] = []  # [{"name": str, "cfg_dict": dict, "added_gen": int}, ...]
 
     for gen in range(gens):
         gen_started = time.time()
         candidates_norm = es.ask()  # list of np.ndarray in normalized [0,1] space
+
+        # Build the archive_opponents payload for this generation
+        archive_opponents = [
+            {"name": a["name"], "cfg_dict": a["cfg_dict"]} for a in archive
+        ]
 
         # Denormalize and decode each candidate to a HeuristicConfig dict
         args = []
         for i, c_norm in enumerate(candidates_norm):
             c_real = _denormalize(np.asarray(c_norm), lowers, uppers)
             cfg_dict = asdict(decode(c_real))
-            args.append((cfg_dict, i, gen, sanity_n_per_opponent, fit_games, sanity_threshold))
+            args.append((
+                cfg_dict, i, gen,
+                sanity_n_per_opponent, fit_games, sanity_threshold,
+                archive_opponents,
+            ))
 
         # PARALLEL: dispatch all candidates to Modal
         results = list(evaluate_fitness.starmap(args))
@@ -609,6 +699,24 @@ def main(
                 best_per_opp_so_far,
             )
 
+        # Rolling archive update: every K gens, append current best-so-far
+        archive_event = None
+        if (gen + 1) % ARCHIVE_UPDATE_INTERVAL == 0 and best_cfg_dict_so_far is not None:
+            new_entry = {
+                "name": f"archive_gen{gen}",
+                "cfg_dict": best_cfg_dict_so_far,
+                "added_gen": gen,
+            }
+            archive.append(new_entry)
+            evicted = None
+            if len(archive) > ARCHIVE_MAX_SIZE:
+                evicted = archive.pop(0)["name"]  # FIFO eviction
+            archive_event = {
+                "added": new_entry["name"],
+                "evicted": evicted,
+                "size_after": len(archive),
+            }
+
         # Log generation
         gen_record = {
             "gen": gen,
@@ -618,6 +726,8 @@ def main(
             "n_disqualified": n_disqualified,
             "best_candidate": args[gen_best_idx][0],
             "per_opponent_breakdown": gen_best_result["per_opp"],
+            "archive_size_at_eval": len(archive_opponents),  # what THIS gen used
+            "archive_event": archive_event,                  # update at end of this gen
             "wall_clock_seconds": wall,
             "estimated_cost_usd": gen_cost,
             "accumulated_cost_usd": accumulated_cost,
@@ -625,10 +735,14 @@ def main(
         with gen_log_path.open("a") as f:
             f.write(json.dumps(gen_record) + "\n")
 
+        archive_str = (
+            f"archive={len(archive_opponents)}"
+            + (f"+1" if archive_event and archive_event["added"] else "")
+        )
         print(
             f"gen {gen+1:>3}/{gens}  best={gen_best:+.4f}  mean={gen_mean:+.4f}  "
-            f"stddev={gen_std:.4f}  disq={n_disqualified}/{pop}  wall={wall:.0f}s  "
-            f"cost=${gen_cost:.2f}  total=${accumulated_cost:.2f}"
+            f"stddev={gen_std:.4f}  disq={n_disqualified}/{pop}  {archive_str}  "
+            f"wall={wall:.0f}s  cost=${gen_cost:.2f}  total=${accumulated_cost:.2f}"
         )
 
     # 7. Write final report
