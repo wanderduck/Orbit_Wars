@@ -642,6 +642,18 @@ def main(
     gen_log_path = out_dir / "generations.jsonl"
     archive: list[dict] = []  # [{"name": str, "cfg_dict": dict, "added_gen": int}, ...]
 
+    # Per-gen best history — used to pick the "robust BEST" at end of run.
+    # Each entry: {gen, fitness, cfg_dict, per_opp, archive_size_at_eval}.
+    # We pick the saved BEST from gens with the maximum archive_size_at_eval
+    # ever seen, so the saved config has been measured against the toughest
+    # fitness landscape that existed during the run (not against an early-
+    # warmup landscape that no later candidate could beat).
+    gen_best_history: list[dict] = []
+    robust_best_archive_size: int = -1
+    robust_best_fitness: float = float("-inf")
+    robust_best_cfg: dict | None = None
+    robust_best_per_opp: dict | None = None
+
     for gen in range(gens):
         gen_started = time.time()
         candidates_norm = es.ask()  # list of np.ndarray in normalized [0,1] space
@@ -650,6 +662,7 @@ def main(
         archive_opponents = [
             {"name": a["name"], "cfg_dict": a["cfg_dict"]} for a in archive
         ]
+        archive_size_at_eval = len(archive_opponents)
 
         # Denormalize and decode each candidate to a HeuristicConfig dict
         args = []
@@ -684,24 +697,53 @@ def main(
         gen_cost = sum(r["wall_clock_seconds"] * 2 * 0.000131 for r in results)
         accumulated_cost += gen_cost
 
-        # Update best-so-far
+        # Track gen-best for end-of-run robust selection
         gen_best_idx = fitnesses.index(gen_best)
         gen_best_result = results[gen_best_idx]
+        gen_best_history.append({
+            "gen": gen,
+            "fitness": gen_best,
+            "cfg_dict": args[gen_best_idx][0],
+            "per_opp": gen_best_result["per_opp"],
+            "archive_size_at_eval": archive_size_at_eval,
+        })
+
+        # Best-EVER tracker (informational — what was the highest fitness
+        # ever seen, regardless of archive state). May be biased toward
+        # early-archive gens with weaker fitness landscapes.
         if gen_best > best_fitness_so_far:
             best_fitness_so_far = gen_best
             best_cfg_dict_so_far = args[gen_best_idx][0]
             best_per_opp_so_far = gen_best_result["per_opp"]
+
+        # Robust BEST: pick from generations with max archive_size_at_eval.
+        # When archive grows (eval gen has > previous max archive size), reset
+        # the running robust-best to this gen's best — earlier gens were
+        # measured against an easier landscape and are no longer comparable.
+        if archive_size_at_eval > robust_best_archive_size:
+            robust_best_archive_size = archive_size_at_eval
+            robust_best_fitness = gen_best
+            robust_best_cfg = args[gen_best_idx][0]
+            robust_best_per_opp = gen_best_result["per_opp"]
             _write_best_config_py(
                 out_dir / "best_config.py",
-                best_cfg_dict_so_far,
-                run_id,
-                best_fitness_so_far,
-                best_per_opp_so_far,
+                robust_best_cfg, run_id, robust_best_fitness, robust_best_per_opp,
+            )
+        elif archive_size_at_eval == robust_best_archive_size and gen_best > robust_best_fitness:
+            robust_best_fitness = gen_best
+            robust_best_cfg = args[gen_best_idx][0]
+            robust_best_per_opp = gen_best_result["per_opp"]
+            _write_best_config_py(
+                out_dir / "best_config.py",
+                robust_best_cfg, run_id, robust_best_fitness, robust_best_per_opp,
             )
 
-        # Rolling archive update: every K gens, append current best-so-far
+        # Rolling archive update: every K gens, append current robust-best
         archive_event = None
         if (gen + 1) % ARCHIVE_UPDATE_INTERVAL == 0 and best_cfg_dict_so_far is not None:
+            # Use best-ever for archive seeding (even if from earlier gen) — we
+            # WANT the archive to include the strongest individuals as
+            # opponents for next gens. Robust-best is for OUTPUT, not archive.
             new_entry = {
                 "name": f"archive_gen{gen}",
                 "cfg_dict": best_cfg_dict_so_far,
@@ -745,10 +787,17 @@ def main(
             f"wall={wall:.0f}s  cost=${gen_cost:.2f}  total=${accumulated_cost:.2f}"
         )
 
-    # 7. Write final report
+    # 7. Write final report. The "BEST" we report is the ROBUST best — best
+    # candidate from a generation with the maximum archive size achieved (i.e.,
+    # measured against the toughest fitness landscape). best_fitness_so_far
+    # is also reported for context (best ever seen, possibly biased to early
+    # warmup gens).
     completed = datetime.now(timezone.utc).isoformat()
     config_blob["completed_at"] = completed
     config_blob["final_accumulated_cost_usd"] = accumulated_cost
+    config_blob["robust_best_fitness"] = robust_best_fitness
+    config_blob["robust_best_archive_size"] = robust_best_archive_size
+    config_blob["best_ever_fitness"] = best_fitness_so_far
     (out_dir / "config.json").write_text(json.dumps(config_blob, indent=2))
 
     _write_final_report(
@@ -756,15 +805,17 @@ def main(
         run_id=run_id,
         profile=profile,
         gen_log_path=gen_log_path,
-        best_cfg=best_cfg_dict_so_far,
-        best_fitness=best_fitness_so_far,
-        best_per_opp=best_per_opp_so_far,
+        best_cfg=robust_best_cfg if robust_best_archive_size >= 0 else best_cfg_dict_so_far,
+        best_fitness=robust_best_fitness if robust_best_archive_size >= 0 else best_fitness_so_far,
+        best_per_opp=robust_best_per_opp if robust_best_archive_size >= 0 else best_per_opp_so_far,
         accumulated_cost=accumulated_cost,
         baseline_cfg=asdict(HeuristicConfig.default()),
     )
 
     print("\n=== Done ===")
-    print(f"  best fitness     : {best_fitness_so_far:+.4f}")
-    print(f"  best per-opp     : {best_per_opp_so_far}")
-    print(f"  total cost spent : ${accumulated_cost:.2f}")
-    print(f"  output dir       : {out_dir}")
+    print(f"  ROBUST best fitness  : {robust_best_fitness:+.4f}  (vs archive_size={robust_best_archive_size})")
+    print(f"  best-EVER fitness    : {best_fitness_so_far:+.4f}  (informational)")
+    if robust_best_archive_size >= 0:
+        print(f"  ROBUST best per-opp  : {robust_best_per_opp}")
+    print(f"  total cost spent     : ${accumulated_cost:.2f}")
+    print(f"  output dir           : {out_dir}")
