@@ -507,7 +507,7 @@ app = modal.App("orbit-wars-cma-tuner", image=tuner_image)
     image=tuner_image,
     cpu=2.0,
     memory=4096,
-    timeout=30 * MINUTES,  # raised from 20 — archive games multiply per-cand wall-clock
+    timeout=120 * MINUTES,  # raised from 30 — accommodates worker preemption restart + archive-saturated wall-clock
 )
 def evaluate_fitness(
     cfg_dict: dict,
@@ -675,8 +675,39 @@ def main(
                 archive_opponents,
             ))
 
-        # PARALLEL: dispatch all candidates to Modal
-        results = list(evaluate_fitness.starmap(args))
+        # PARALLEL: dispatch all candidates to Modal.
+        # return_exceptions=True is critical: without it, ANY single-input
+        # failure (FunctionTimeoutError from preemption-restart, OOM, etc.)
+        # propagates to the local driver and kills the whole sweep mid-run.
+        # We map exceptions to a synthetic disqualified-result so CMA-ES sees
+        # them as DISQUALIFIED_FITNESS and steers away from that region.
+        raw_results = list(evaluate_fitness.starmap(args, return_exceptions=True))
+        results = []
+        n_failed_eval = 0
+        for i, r in enumerate(raw_results):
+            if isinstance(r, BaseException):
+                n_failed_eval += 1
+                _cfg_dict, cand_id, gen_id, *_ = args[i]
+                empty_per_opp = {FITNESS_ANCHOR: 0.0}
+                for arch in archive_opponents:
+                    empty_per_opp[arch["name"]] = 0.0
+                results.append({
+                    "candidate_id": cand_id,
+                    "generation": gen_id,
+                    "sanity_pass": False,
+                    "fitness": DISQUALIFIED_FITNESS,
+                    "per_opp": empty_per_opp,
+                    "sanity_winrates": {},
+                    "wall_clock_seconds": 0.0,
+                    "failure_reason": f"{type(r).__name__}: {r}",
+                })
+            else:
+                results.append(r)
+        if n_failed_eval:
+            print(
+                f"  [resilience] gen {gen}: {n_failed_eval}/{len(args)} candidates "
+                f"failed infra-side (treated as disqualified)"
+            )
 
         # Sort results by candidate_id so they line up with candidates_norm
         results.sort(key=lambda r: r["candidate_id"])
@@ -760,12 +791,16 @@ def main(
             }
 
         # Log generation
+        # n_disqualified counts ALL DISQUALIFIED_FITNESS results (sanity-fail
+        # plus infra-fail). n_failed_eval is the infra-fail subset, broken out
+        # so we can tell "candidate was bad" from "Modal preempted/timed out."
         gen_record = {
             "gen": gen,
             "best_fitness": gen_best,
             "mean_fitness": gen_mean,
             "fitness_stddev": gen_std,
             "n_disqualified": n_disqualified,
+            "n_failed_eval": n_failed_eval,
             "best_candidate": args[gen_best_idx][0],
             "per_opponent_breakdown": gen_best_result["per_opp"],
             "archive_size_at_eval": len(archive_opponents),  # what THIS gen used
@@ -783,8 +818,8 @@ def main(
         )
         print(
             f"gen {gen+1:>3}/{gens}  best={gen_best:+.4f}  mean={gen_mean:+.4f}  "
-            f"stddev={gen_std:.4f}  disq={n_disqualified}/{pop}  {archive_str}  "
-            f"wall={wall:.0f}s  cost=${gen_cost:.2f}  total=${accumulated_cost:.2f}"
+            f"stddev={gen_std:.4f}  disq={n_disqualified}/{pop} (infra-fail={n_failed_eval})  "
+            f"{archive_str}  wall={wall:.0f}s  cost=${gen_cost:.2f}  total=${accumulated_cost:.2f}"
         )
 
     # 7. Write final report. The "BEST" we report is the ROBUST best — best
