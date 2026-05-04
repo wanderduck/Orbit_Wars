@@ -59,6 +59,8 @@ When you split the agent into helper modules, keep imports relative-flat (no pac
 
 **Per competition rules (Section 12):** the agent must not perform network I/O during episode evaluation. Bundle any model weights into the tarball.
 
+**Submitting CMA-ES-tuned configs:** the existing `src/main.py` ships `HeuristicConfig.default()`. To submit a tuned BEST config from `docs/research_documents/tuning_runs/<timestamp>/best_config.py`, build a custom main.py with values baked in + agent wrapper `def agent(obs, _env_config=None): return strategy.agent(obs, BEST)`. Bundle: `tar -czf submission-<tag>.tar.gz -C $SUBMIT_DIR main.py orbit_wars`. See `submission-bestv2-2026-05-02.tar.gz` and `submission-bestv3-2026-05-03.tar.gz` for working examples (extract to inspect main.py shape).
+
 ## Agent architecture
 
 The submission entry point is `src/main.py:agent(obs)`. It is **stateless** by contract — Kaggle calls it once per turn with up to 1 second wall-clock (`actTimeout=1`). Persisting state across turns requires a module-level cache; remember the same agent function is also used for self-play validation, so any cache must be keyed by `obs.player` or reset when a new episode begins.
@@ -80,7 +82,8 @@ The current agent (v1.5G) is a nearest-target sniper plus defense, with WorldMod
 ## Known gaps / be critical
 
 - **README.md is a placeholder** — don't treat it as documentation.
-- **Local opponent pool is all-beaten 100%.** `random`, `starter`, `competent_sniper`, `aggressive_swarm`, `defensive_turtle` — none differentiate v1.4 from v1.5 from v1.5G. Self-play also favors v1.5 contradicting Kaggle data. Ground truth for ranking changes lives only on the Kaggle ladder; budget submission slots accordingly (≈3/day).
+- **Local opponent pool is fully saturated against default.** Spot-check (n=100/cell, 2026-05-03) confirmed: aggressive_swarm 100%, defensive_turtle 100%, competent_sniper 100%, peer_mdmahfuzsumon 96%, starter 94%. Only asymmetric self-play (tuned-cfg vs default-cfg) provides differentiating signal — but Phase 3 BEST_v2 with +1.12 local margin → 663.7 μ on ladder, so even self-play isn't a reliable predictor. Ground truth for ranking changes lives only on the Kaggle ladder; budget submission slots accordingly (≈3/day).
+- **Kaggle ladder μ updates over time.** Initial readings after submission drift ±50 μ over hours as more episodes run. BEST_v2 read 614 μ at first check → 663.7 μ ~12 hours later. Wait at least 4-6 hours before drawing conclusions; compare against same-day-old reference submissions, not week-old.
 - **Hungarian vs greedy offense — still unresolved within noise band.** v1.5G (greedy + defense) recent readings span ~650-800 μ; v1.5 (Hungarian + defense) prior readings were ~600-655 μ. With v1.5G's ~100 μ per-submission swing, the apparent gap collapses into the noise floor — the A/B is not actually decided. `use_hungarian_offense=False` remains the working default for v1.5G but should NOT be treated as proven superior. A future controlled re-test (multiple submissions of each variant) would be needed to resolve.
 - **No 4-player FFA-aware logic.** Agent treats all non-self planets as targets without considering kingmaker dynamics or alliance-of-convenience patterns.
 - **No multi-source coordination.** Each owned planet picks a target independently; no swarm mission (E6 pattern).
@@ -102,6 +105,8 @@ When the agent loses or behaves unexpectedly, **diagnose before fixing**. The to
 - **`git commit` commits the staged INDEX, not just files you named.** `git add <specific files>` followed by `git commit -m "..."` will sweep in anything the user (or another tool) had pre-staged. Multiple Phase 1/2 commits silently included GitHub Desktop's pending stage. **Always run `git status -s` immediately before `git commit`**; if the index has unexpected files, `git reset HEAD <file>` to unstage them, then commit. Never use `git add -A` / `git add .` — name files explicitly.
 - **User runs GitHub Desktop in parallel.** Branch state, working-tree state, and stage contents can shift between turns without any prompt from the user. After any pause (skill invocations, long agent runs, usage-limit reset), re-check `git branch --show-current && git status -s` before assuming the world matches your last view. Don't blindly continue a multi-step git operation across pause boundaries.
 - **Subagents read reliably, write inconsistently.** `general-purpose` and `python3-development:codebase-analyzer` agents can Read project files fine, but Writing to nested project paths (especially `docs/research_documents/...`) has failed silently multiple times — they create doubled paths, write to `/tmp/`, or return success without the file actually appearing. Pattern that works: have subagents return findings INLINE in their reply text; the parent agent (this one) does all Write/Edit calls. Confirms with file_path:line_number after writing.
+- **Modal CLI gotcha:** `uv run modal token info` to verify auth (NOT `modal token current` — doesn't exist).
+- **CMA-ES rolling-archive design rule.** Save robust-BEST = best-from-max-archive-size-seen generation, NOT best-ever-fitness. Best-ever is biased toward early/warmup gens with smaller archives (easier fitness landscape). The optimization (CMA-ES `tell()`) uses gen-specific fitness regardless; only the saved artifact differs. Already implemented in `src/tools/modal_tuner.py`; document here so it's not "fixed" the wrong way later.
 
 ## Repo layout (only the non-obvious bits)
 
