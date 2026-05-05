@@ -45,6 +45,7 @@ __all__ = [
     "ValidationTriple",
     "extract_state_and_actions",
     "inject_state_and_step",
+    "state_diff",
 ]
 
 
@@ -230,6 +231,85 @@ def inject_state_and_step(
     ]
     env.step(env_actions)
     return env
+
+
+# ---------------------------------------------------------------------------
+# state_diff — categorized mismatch detection
+# ---------------------------------------------------------------------------
+
+
+def state_diff(
+    actual: SimState,
+    expected: SimState,
+    *,
+    pos_tolerance: float = 0.1,
+    ship_tolerance: int = 0,
+) -> dict[str, int]:
+    """Categorize differences between two SimStates.
+
+    Returns a dict mapping category-name → count-of-diffs-in-that-category.
+    Empty dict when states match within tolerances.
+
+    Categories:
+      - "step-mismatch":          state.step differs (count: 0 or 1)
+      - "planet-count-mismatch":  len(planets) differs
+      - "ownership-flip":         per-planet owner differs (count: # planets)
+      - "ship-count-off":         per-planet ships differs by > ship_tolerance
+      - "fleet-count-mismatch":   len(fleets) differs
+      - "fleet-position-drift":   per-fleet (x,y) differs by > pos_tolerance
+                                  (only checked when fleet IDs match in both states)
+      - "fleet-id-set-mismatch":  fleet ID set differs
+      - "comet-related":          comet group count or path_index differs
+
+    Each category counts AT MOST per-element (not summed across multiple
+    fields of one element). For Day 3-5, "fleet-position-drift" is expected
+    to be common because the simulator's Phase 4 stub doesn't move fleets.
+    """
+    diff: dict[str, int] = {}
+
+    if actual.step != expected.step:
+        diff["step-mismatch"] = 1
+
+    # Planets
+    if len(actual.planets) != len(expected.planets):
+        diff["planet-count-mismatch"] = abs(len(actual.planets) - len(expected.planets))
+    actual_p_by_id = {p.id: p for p in actual.planets}
+    expected_p_by_id = {p.id: p for p in expected.planets}
+    common_p_ids = set(actual_p_by_id) & set(expected_p_by_id)
+    own_diffs = 0
+    ship_diffs = 0
+    for pid in common_p_ids:
+        ap, ep = actual_p_by_id[pid], expected_p_by_id[pid]
+        if ap.owner != ep.owner:
+            own_diffs += 1
+        if abs(ap.ships - ep.ships) > ship_tolerance:
+            ship_diffs += 1
+    if own_diffs:
+        diff["ownership-flip"] = own_diffs
+    if ship_diffs:
+        diff["ship-count-off"] = ship_diffs
+
+    # Fleets
+    if len(actual.fleets) != len(expected.fleets):
+        diff["fleet-count-mismatch"] = abs(len(actual.fleets) - len(expected.fleets))
+    actual_f_by_id = {f.id: f for f in actual.fleets}
+    expected_f_by_id = {f.id: f for f in expected.fleets}
+    if set(actual_f_by_id) != set(expected_f_by_id):
+        diff["fleet-id-set-mismatch"] = len(set(actual_f_by_id) ^ set(expected_f_by_id))
+    common_f_ids = set(actual_f_by_id) & set(expected_f_by_id)
+    pos_diffs = 0
+    for fid in common_f_ids:
+        af, ef = actual_f_by_id[fid], expected_f_by_id[fid]
+        if abs(af.x - ef.x) > pos_tolerance or abs(af.y - ef.y) > pos_tolerance:
+            pos_diffs += 1
+    if pos_diffs:
+        diff["fleet-position-drift"] = pos_diffs
+
+    # Comets (basic — full coverage lands Day 9-11)
+    if len(actual.comet_groups) != len(expected.comet_groups):
+        diff["comet-related"] = abs(len(actual.comet_groups) - len(expected.comet_groups))
+
+    return diff
 
 
 # ---------------------------------------------------------------------------
