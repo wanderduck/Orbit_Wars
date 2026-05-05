@@ -91,8 +91,10 @@ class Simulator:
         raise NotImplementedError("Phase 2 (apply actions) lands Day 3-5")
 
     def _phase_3_production(self, state: SimState) -> None:
-        """env L514-517: planet.ships += planet.production for owner != -1. Day 3-5."""
-        raise NotImplementedError("Phase 3 (production) lands Day 3-5")
+        """env L514-517: planet.ships += planet.production for owner != -1."""
+        for p in state.planets:
+            if p.owner != -1:
+                p.ships += p.production
 
     def _phase_4_advance_fleets(
         self, state: SimState, combat_lists: dict[int, list]
