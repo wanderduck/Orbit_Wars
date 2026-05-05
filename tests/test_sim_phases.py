@@ -202,3 +202,76 @@ class TestPhase2ApplyActions:
         assert len(state.fleets) == 2
         owners = [f.owner for f in state.fleets]
         assert owners == [0, 1]
+
+
+class TestPhase0CometExpirationNoop:
+    def test_no_comets_no_change(self):
+        sim = Simulator()
+        state = _state([_planet(0)])
+        sim._phase_0_comet_expiration(state)
+        # Day 3-5 scenarios have no comets; phase 0 is a no-op for now.
+        assert state.comet_groups == []
+        assert len(state.planets) == 1
+
+
+class TestPhase4StubArrivalDetection:
+    def test_in_flight_fleet_arriving_this_turn_pushed_to_combat_list(self):
+        sim = Simulator()
+        # Source at (0,0), target at (5,0). Fleet of 1 ship → speed = 1 (per fleet_speed formula).
+        # Distance = 5; eta from current position would be ceil(5/1) = 5 turns.
+        # Place the fleet at (4,0) so eta = ceil(1/1) = 1 turn.
+        state = _state(
+            [
+                _planet(0, owner=0, ships=1.0, x=0.0, y=0.0, radius=2.0),
+                _planet(1, owner=-1, ships=0.0, x=5.0, y=0.0, radius=2.0),
+            ],
+            fleets=[SimFleet(
+                id=0, owner=0, from_planet_id=0, target_planet_id=1,
+                x=4.0, y=0.0, angle=0.0, ships=1, spawned_at_step=0,
+            )],
+        )
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_4_advance_fleets(state, combat_lists)
+        # Fleet should be flagged as arriving at planet 1 this turn
+        assert len(combat_lists[1]) == 1
+        assert combat_lists[1][0].owner == 0
+        assert combat_lists[1][0].ships == 1
+        # Fleet should be removed from the in-flight list (it arrived)
+        assert state.fleets == []
+
+    def test_in_flight_fleet_not_arriving_unchanged(self):
+        sim = Simulator()
+        state = _state(
+            [
+                _planet(0, owner=0, ships=10.0, x=0.0, y=0.0),
+                _planet(1, owner=-1, ships=0.0, x=50.0, y=0.0),
+            ],
+            fleets=[SimFleet(
+                id=0, owner=0, from_planet_id=0, target_planet_id=1,
+                x=5.0, y=0.0, angle=0.0, ships=10, spawned_at_step=0,
+            )],
+        )
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_4_advance_fleets(state, combat_lists)
+        # Far from target → not arriving this turn
+        assert combat_lists[0] == []
+        assert combat_lists[1] == []
+        # Fleet is still in flight (not removed). Day 3-5 stub does NOT
+        # advance the fleet's position; that lands Day 5-7.
+        assert len(state.fleets) == 1
+
+    def test_fleet_with_no_target_left_in_flight(self):
+        """Fleets spawned in Phase 2 have target_planet_id=-1; stub leaves them in flight."""
+        sim = Simulator()
+        state = _state(
+            [_planet(0, owner=0, ships=10.0, x=0.0, y=0.0)],
+            fleets=[SimFleet(
+                id=0, owner=0, from_planet_id=0, target_planet_id=-1,
+                x=0.0, y=0.0, angle=0.5, ships=3, spawned_at_step=0,
+            )],
+        )
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_4_advance_fleets(state, combat_lists)
+        # No target_planet_id resolved → stub cannot compute ETA, leaves it in flight
+        assert len(state.fleets) == 1
+        assert combat_lists[0] == []

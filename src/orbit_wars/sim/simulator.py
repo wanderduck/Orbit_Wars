@@ -73,8 +73,14 @@ class Simulator:
     # ------------------------------------------------------------------
 
     def _phase_0_comet_expiration(self, state: SimState) -> None:
-        """env L419-439: drop comets where path_index >= len(path). Day 9-11."""
-        raise NotImplementedError("Phase 0 (comet expiration) lands Day 9-11")
+        """env L419-439: drop comets where path_index >= len(path).
+
+        Day 3-5 scenarios are filtered to exclude comets; this is a no-op
+        for now. Real implementation lands Day 9-11. If a comet appears
+        here despite the filter, the validator's diff will catch it under
+        'comet-related'.
+        """
+        return
 
     def _phase_1_comet_spawn(self, state: SimState) -> None:
         """env L441-477: spawn at COMET_SPAWN_STEPS=[50,150,250,350,450].
@@ -124,9 +130,38 @@ class Simulator:
     def _phase_4_advance_fleets(
         self, state: SimState, combat_lists: dict[int, list]
     ) -> None:
-        """env L519-551: move fleets by speed; sun collision (< SUN_RADIUS, no margin);
-        planet collision (< planet.radius, no margin); push hits into combat_lists. Day 5-7."""
-        raise NotImplementedError("Phase 4 (advance fleets) lands Day 5-7")
+        """env L519-551: STUB. Detect in-flight fleets arriving THIS turn
+        and push them into combat_lists. Does NOT advance fleet positions.
+
+        Day 3-5 stub: borrows fleet ETA prediction from straight-line distance
+        (safe for static planets only). Real Phase 4 (sun + planet collisions,
+        position update, sweep) lands Day 5-7.
+        """
+        from orbit_wars.geometry import dist, fleet_speed
+        from orbit_wars.world import ArrivalEvent
+
+        remaining_fleets = []
+        for fleet in state.fleets:
+            target = state.planet_by_id(fleet.target_planet_id)
+            if target is None:
+                # Fleet has no resolved target (e.g., spawned this turn by
+                # Phase 2 with target_planet_id=-1). Cannot compute ETA;
+                # leave in flight, will be picked up next turn.
+                remaining_fleets.append(fleet)
+                continue
+            speed = fleet_speed(fleet.ships)
+            distance = dist(fleet.x, fleet.y, target.x, target.y)
+            # ETA in TURNS rounded up; eta=1 means "arrives this turn"
+            eta_turns = max(1, int((distance + speed - 1) / speed))
+            if eta_turns <= 1:
+                combat_lists.setdefault(target.id, []).append(
+                    ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
+                )
+                # Fleet consumed
+            else:
+                # Stays in flight; Day 3-5 stub does NOT update position
+                remaining_fleets.append(fleet)
+        state.fleets = remaining_fleets
 
     def _phase_5_rotate_planets(
         self, state: SimState, combat_lists: dict[int, list]
