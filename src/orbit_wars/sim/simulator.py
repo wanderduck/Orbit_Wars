@@ -128,8 +128,12 @@ class Simulator:
 
         Process players in ascending player_id order so fleet IDs are stable
         across runs (matches env behavior — env iterates players in fixed
-        order per env L479).
+        order per env L479). Per env L497-499, fleets spawn just OUTSIDE
+        the source planet (planet.radius + LAUNCH_CLEARANCE=0.1) so they
+        don't immediately collide with their origin in Phase 4.
         """
+        import math
+
         for player_id in sorted(actions):
             for action in actions[player_id]:
                 if not validate_move(state, player_id, action):
@@ -137,13 +141,14 @@ class Simulator:
                 src = state.planet_by_id(action.from_planet_id)
                 # validate_move guarantees src is non-None and player-owned
                 assert src is not None
+                clearance = src.radius + 0.1  # env LAUNCH_CLEARANCE
                 fleet = SimFleet(
                     id=state.next_fleet_id,
                     owner=player_id,
                     from_planet_id=src.id,
                     target_planet_id=-1,        # derived later by Phase 4 if needed
-                    x=src.x,
-                    y=src.y,
+                    x=src.x + math.cos(action.angle) * clearance,
+                    y=src.y + math.sin(action.angle) * clearance,
                     angle=action.angle,
                     ships=action.ships,
                     spawned_at_step=state.step,

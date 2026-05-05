@@ -1,6 +1,8 @@
 """Per-phase property tests for the MCTS forward-model simulator."""
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from orbit_wars.sim.action import Action
@@ -145,8 +147,12 @@ class TestPhase2ApplyActions:
         assert f.id == 42
         assert f.owner == 0
         assert f.from_planet_id == 0
-        assert f.x == 20.0  # source planet position
-        assert f.y == 30.0
+        # Env spawns just outside the planet (planet.radius + 0.1 launch
+        # clearance) so the fleet doesn't immediately collide with its origin.
+        # See env L498-499. Default planet radius in _planet() is 2.0.
+        clearance = 2.0 + 0.1
+        assert f.x == pytest.approx(20.0 + math.cos(1.5) * clearance)
+        assert f.y == pytest.approx(30.0 + math.sin(1.5) * clearance)
         assert f.angle == 1.5
         assert f.ships == 4
         assert state.next_fleet_id == 43
