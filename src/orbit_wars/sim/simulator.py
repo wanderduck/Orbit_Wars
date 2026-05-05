@@ -44,9 +44,6 @@ class Simulator:
     # Toggle whether to skip phase 1 (comet spawn). Should be True (the env's
     # comet spawn uses RNG we can't reproduce — see design doc Section 5 risk #2).
     skip_comet_spawn: bool = True
-    # Toggle whether to skip phase 5 (rotation + sweep). True for Day 3-5
-    # (phase unimplemented). Becomes False once real Phase 5 lands (Day 7-9).
-    skip_phase_5: bool = True
 
     def step(
         self, state: SimState, actions: dict[int, list[Action]]
@@ -56,7 +53,6 @@ class Simulator:
         `actions` keys are player IDs (0-indexed). Missing players default to no actions.
         """
         new_state = deepcopy(state)
-        new_state.step += 1
 
         self._phase_0_comet_expiration(new_state)
         if not self.skip_comet_spawn:
@@ -66,38 +62,14 @@ class Simulator:
         self._phase_2_apply_actions(new_state, actions)
         self._phase_3_production(new_state)
         self._phase_4_advance_fleets(new_state, combat_lists)
-        # Phase 5 (rotation + comet sweep) is unimplemented (Days 7-9).
-        # For Day 3-5, real games have ~28 planets with most rotating —
-        # the original "no rotating bodies" guard would only trigger for
-        # synthetic test states. If skip_phase_5 is True (default), we
-        # silently skip Phase 5 so step() works end-to-end on real
-        # scenarios; planet x/y will diverge from env (state_diff doesn't
-        # check x/y so this is fine for Day 3-5) but rotation-induced
-        # fleet sweeps are NOT captured and will manifest as fleet-count
-        # / ownership-flip divergence on long-running fleet states.
-        if not self.skip_phase_5:
-            self._phase_5_rotate_planets(new_state, combat_lists)
+        self._phase_5_rotate_planets(new_state, combat_lists)
         self._phase_6_resolve_combat(new_state, combat_lists)
 
+        # Step increments LAST (matches env semantics: env reads obs.step
+        # for Phase 5 rotation BEFORE incrementing; see env L555).
+        new_state.step += 1
         return new_state
 
-    def _has_rotating_bodies(self, state: SimState) -> bool:
-        """True iff this state contains any planet that would rotate or any comets.
-
-        Static planets (env L572): orbital_r + radius >= ROTATION_RADIUS_LIMIT (50).
-        Originally intended as a Phase 5 short-circuit guard, but real games
-        have ~28 planets with most rotating, so the guard tripped almost never.
-        Replaced with the simpler skip_phase_5 flag. This helper retained for
-        the Phase 5 stub regression test (test_phase_5_rotation_still_raises).
-        """
-        from orbit_wars.geometry import ROTATION_RADIUS_LIMIT, orbital_radius
-
-        if state.comet_groups:
-            return True
-        for p in state.planets:
-            if orbital_radius(p.x, p.y) + p.radius < ROTATION_RADIUS_LIMIT:
-                return True
-        return False
 
     # ------------------------------------------------------------------
     # Phases — stubs. Land per design doc Section 4 build order.
@@ -227,9 +199,61 @@ class Simulator:
     def _phase_5_rotate_planets(
         self, state: SimState, combat_lists: dict[int, list]
     ) -> None:
-        """env L553-627: rotate orbiting planets (r + radius < ROTATION_RADIUS_LIMIT);
-        advance comet path_index; sweep_fleets for fleets caught by moving planets. Day 7-9."""
-        raise NotImplementedError("Phase 5 (rotate + sweep) lands Day 7-9")
+        """env L553-627: rotate orbiting planets and sweep fleets caught in arc.
+
+        For each non-comet planet:
+          - Compute initial radius r and initial_angle from initial_planets
+          - If r + radius < ROTATION_RADIUS_LIMIT: rotate to
+              new_pos = CENTER + r * (cos(initial_angle + ang_vel * step),
+                                      sin(initial_angle + ang_vel * step))
+          - sweep_fleets(planet, old_pos, new_pos) — if old==new, no-op;
+            else for each fleet not yet swept this turn, check if fleet's
+            position is within planet.radius of the swept segment; if so,
+            push to combat_lists[planet.id] and mark fleet swept
+
+        Comet movement (env L592-611) is NOT handled here — Day 9-11 work.
+        """
+        import math
+        from orbit_wars.geometry import ROTATION_RADIUS_LIMIT, SUN_CENTER, point_to_segment_distance
+        from orbit_wars.world import ArrivalEvent
+
+        initial_by_id = {p.id: p for p in state.initial_planets}
+        swept_fleet_ids: set[int] = set()
+
+        for planet in state.planets:
+            if planet.is_comet:
+                continue
+            initial_p = initial_by_id.get(planet.id)
+            if initial_p is None:
+                continue
+
+            dx = initial_p.x - SUN_CENTER[0]
+            dy = initial_p.y - SUN_CENTER[1]
+            r = math.sqrt(dx * dx + dy * dy)
+            old_pos = (planet.x, planet.y)
+
+            if r + planet.radius < ROTATION_RADIUS_LIMIT:
+                initial_angle = math.atan2(dy, dx)
+                current_angle = initial_angle + state.angular_velocity * state.step
+                planet.x = SUN_CENTER[0] + r * math.cos(current_angle)
+                planet.y = SUN_CENTER[1] + r * math.sin(current_angle)
+
+            new_pos = (planet.x, planet.y)
+
+            # sweep_fleets — env L559-568
+            if old_pos == new_pos:
+                continue
+            for fleet in state.fleets:
+                if fleet.id in swept_fleet_ids:
+                    continue
+                if point_to_segment_distance((fleet.x, fleet.y), old_pos, new_pos) < planet.radius:
+                    combat_lists.setdefault(planet.id, []).append(
+                        ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
+                    )
+                    swept_fleet_ids.add(fleet.id)
+
+        if swept_fleet_ids:
+            state.fleets = [f for f in state.fleets if f.id not in swept_fleet_ids]
 
     def _phase_6_resolve_combat(
         self, state: SimState, combat_lists: dict[int, list]

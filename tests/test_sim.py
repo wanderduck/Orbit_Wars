@@ -122,15 +122,6 @@ class TestSimulatorPhaseStubs:
         with pytest.raises(NotImplementedError):
             sim._phase_1_comet_spawn(state)
 
-    def test_phase_5_rotation_still_raises(self):
-        """Phase 5 (rotation + sweep) lands Day 7-9; should still raise when
-        called directly. step() guards via _has_rotating_bodies for Day 3-5
-        scenarios, but the phase method itself remains unimplemented."""
-        sim = Simulator()
-        state = _state([SimPlanet(id=0, x=0, y=0, radius=2, owner=0, ships=10, production=1)])
-        with pytest.raises(NotImplementedError):
-            sim._phase_5_rotate_planets(state, {})
-
 
 class TestValidatorBasic:
     def test_validate_returns_empty_report_on_no_triples(self):
