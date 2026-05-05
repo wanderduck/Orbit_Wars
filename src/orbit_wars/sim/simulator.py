@@ -27,8 +27,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
-from .action import Action
-from .state import SimState
+from .action import Action, validate_move
+from .state import SimFleet, SimState
 
 __all__ = ["Simulator"]
 
@@ -87,8 +87,33 @@ class Simulator:
     def _phase_2_apply_actions(
         self, state: SimState, actions: dict[int, list[Action]]
     ) -> None:
-        """env L479-512: validate each move, spawn accepted fleets, increment next_fleet_id. Day 3-5."""
-        raise NotImplementedError("Phase 2 (apply actions) lands Day 3-5")
+        """env L479-512: validate each move, spawn accepted fleets, increment next_fleet_id.
+
+        Process players in ascending player_id order so fleet IDs are stable
+        across runs (matches env behavior — env iterates players in fixed
+        order per env L479).
+        """
+        for player_id in sorted(actions):
+            for action in actions[player_id]:
+                if not validate_move(state, player_id, action):
+                    continue
+                src = state.planet_by_id(action.from_planet_id)
+                # validate_move guarantees src is non-None and player-owned
+                assert src is not None
+                fleet = SimFleet(
+                    id=state.next_fleet_id,
+                    owner=player_id,
+                    from_planet_id=src.id,
+                    target_planet_id=-1,        # derived later by Phase 4 if needed
+                    x=src.x,
+                    y=src.y,
+                    angle=action.angle,
+                    ships=action.ships,
+                    spawned_at_step=state.step,
+                )
+                state.fleets.append(fleet)
+                state.next_fleet_id += 1
+                src.ships -= action.ships
 
     def _phase_3_production(self, state: SimState) -> None:
         """env L514-517: planet.ships += planet.production for owner != -1."""

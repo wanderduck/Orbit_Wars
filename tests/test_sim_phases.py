@@ -130,3 +130,75 @@ class TestPhase6Combat:
         # 4 attackers vs 10 garrison → garrison wins, reduced by 4
         assert state.planets[0].owner == 0
         assert state.planets[0].ships == 6.0
+
+
+class TestPhase2ApplyActions:
+    def test_accepted_launch_spawns_fleet(self):
+        sim = Simulator()
+        state = _state([
+            _planet(0, owner=0, ships=10.0, x=20.0, y=30.0),
+        ], next_fleet_id=42)
+        actions = {0: [Action(from_planet_id=0, angle=1.5, ships=4)]}
+        sim._phase_2_apply_actions(state, actions)
+        assert len(state.fleets) == 1
+        f = state.fleets[0]
+        assert f.id == 42
+        assert f.owner == 0
+        assert f.from_planet_id == 0
+        assert f.x == 20.0  # source planet position
+        assert f.y == 30.0
+        assert f.angle == 1.5
+        assert f.ships == 4
+        assert state.next_fleet_id == 43
+
+    def test_accepted_launch_decrements_source_ships(self):
+        sim = Simulator()
+        state = _state([_planet(0, owner=0, ships=10.0)])
+        actions = {0: [Action(from_planet_id=0, angle=0.0, ships=4)]}
+        sim._phase_2_apply_actions(state, actions)
+        assert state.planets[0].ships == 6.0
+
+    def test_invalid_action_silently_dropped(self):
+        sim = Simulator()
+        state = _state([
+            _planet(0, owner=0, ships=10.0),
+            _planet(1, owner=1, ships=10.0),
+        ], next_fleet_id=0)
+        # Player 0 tries to launch from player 1's planet — silently rejected
+        actions = {0: [Action(from_planet_id=1, angle=0.0, ships=5)]}
+        sim._phase_2_apply_actions(state, actions)
+        assert state.fleets == []
+        assert state.next_fleet_id == 0
+        assert state.planets[1].ships == 10.0  # unchanged
+
+    def test_multiple_actions_per_player_assign_sequential_ids(self):
+        sim = Simulator()
+        state = _state([
+            _planet(0, owner=0, ships=20.0),
+        ], next_fleet_id=100)
+        actions = {0: [
+            Action(from_planet_id=0, angle=0.0, ships=3),
+            Action(from_planet_id=0, angle=1.0, ships=4),
+        ]}
+        sim._phase_2_apply_actions(state, actions)
+        assert len(state.fleets) == 2
+        assert state.fleets[0].id == 100
+        assert state.fleets[1].id == 101
+        assert state.next_fleet_id == 102
+        assert state.planets[0].ships == 13.0  # 20 - 3 - 4
+
+    def test_actions_processed_in_player_order(self):
+        sim = Simulator()
+        state = _state([
+            _planet(0, owner=0, ships=20.0),
+            _planet(1, owner=1, ships=20.0),
+        ], next_fleet_id=0)
+        actions = {
+            1: [Action(from_planet_id=1, angle=0.0, ships=3)],
+            0: [Action(from_planet_id=0, angle=0.0, ships=3)],
+        }
+        sim._phase_2_apply_actions(state, actions)
+        # Both spawned, player 0 first by ID
+        assert len(state.fleets) == 2
+        owners = [f.owner for f in state.fleets]
+        assert owners == [0, 1]
