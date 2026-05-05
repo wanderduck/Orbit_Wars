@@ -166,37 +166,62 @@ class Simulator:
     def _phase_4_advance_fleets(
         self, state: SimState, combat_lists: dict[int, list]
     ) -> None:
-        """env L519-551: STUB. Detect in-flight fleets arriving THIS turn
-        and push them into combat_lists. Does NOT advance fleet positions.
+        """env L519-551: advance each fleet by speed; remove on OOB, sun
+        collision, or planet collision (continuous via point-to-segment).
 
-        Day 3-5 stub: borrows fleet ETA prediction from straight-line distance
-        (safe for static planets only). Real Phase 4 (sun + planet collisions,
-        position update, sweep) lands Day 5-7.
+        For each fleet, in env iteration order:
+          1. Update position by (cos(angle), sin(angle)) * fleet_speed(ships)
+          2. If new position is outside [0, BOARD_SIZE]^2 → remove (no combat)
+          3. If segment from old→new passes within SUN_RADIUS of sun → remove
+          4. Iterate planets IN ORDER: if segment passes within planet.radius
+             of any planet, push ArrivalEvent to combat_lists[that planet.id],
+             remove the fleet, and BREAK (first match wins, per env L549)
+          5. Otherwise survive with updated position
         """
-        from orbit_wars.geometry import dist, fleet_speed
+        import math
+        from orbit_wars.geometry import (
+            BOARD_SIZE,
+            SUN_CENTER,
+            SUN_RADIUS,
+            fleet_speed,
+            point_to_segment_distance,
+        )
         from orbit_wars.world import ArrivalEvent
 
         remaining_fleets = []
         for fleet in state.fleets:
-            target = state.planet_by_id(fleet.target_planet_id)
-            if target is None:
-                # Fleet has no resolved target (e.g., spawned this turn by
-                # Phase 2 with target_planet_id=-1). Cannot compute ETA;
-                # leave in flight, will be picked up next turn.
-                remaining_fleets.append(fleet)
-                continue
             speed = fleet_speed(fleet.ships)
-            distance = dist(fleet.x, fleet.y, target.x, target.y)
-            # ETA in TURNS rounded up; eta=1 means "arrives this turn"
-            eta_turns = max(1, int((distance + speed - 1) / speed))
-            if eta_turns <= 1:
-                combat_lists.setdefault(target.id, []).append(
-                    ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
-                )
-                # Fleet consumed
-            else:
-                # Stays in flight; Day 3-5 stub does NOT update position
-                remaining_fleets.append(fleet)
+            old_pos = (fleet.x, fleet.y)
+            new_x = fleet.x + math.cos(fleet.angle) * speed
+            new_y = fleet.y + math.sin(fleet.angle) * speed
+            new_pos = (new_x, new_y)
+
+            # Out-of-bounds: removed silently (no combat).
+            if not (0 <= new_x <= BOARD_SIZE and 0 <= new_y <= BOARD_SIZE):
+                continue
+
+            # Sun collision: removed silently (no combat).
+            if point_to_segment_distance(SUN_CENTER, old_pos, new_pos) < SUN_RADIUS:
+                continue
+
+            # Planet collision (any planet on path) — first match wins.
+            collided = False
+            for planet in state.planets:
+                planet_pos = (planet.x, planet.y)
+                if point_to_segment_distance(planet_pos, old_pos, new_pos) < planet.radius:
+                    combat_lists.setdefault(planet.id, []).append(
+                        ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
+                    )
+                    collided = True
+                    break
+
+            if collided:
+                continue
+
+            # Survived: commit new position.
+            fleet.x = new_x
+            fleet.y = new_y
+            remaining_fleets.append(fleet)
         state.fleets = remaining_fleets
 
     def _phase_5_rotate_planets(

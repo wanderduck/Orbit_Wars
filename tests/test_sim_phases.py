@@ -220,12 +220,16 @@ class TestPhase0CometExpirationNoop:
         assert len(state.planets) == 1
 
 
-class TestPhase4StubArrivalDetection:
-    def test_in_flight_fleet_arriving_this_turn_pushed_to_combat_list(self):
+class TestPhase4FleetMovement:
+    """Real Phase 4 (Day 5-7): fleet position update + sun + planet + OOB collision.
+
+    Per env L519-551. Real Phase 4 doesn't use target_planet_id — collisions
+    are checked against ALL planets on the path.
+    """
+
+    def test_fleet_arriving_pushed_to_combat_list_and_removed(self):
         sim = Simulator()
-        # Source at (0,0), target at (5,0). Fleet of 1 ship → speed = 1 (per fleet_speed formula).
-        # Distance = 5; eta from current position would be ceil(5/1) = 5 turns.
-        # Place the fleet at (4,0) so eta = ceil(1/1) = 1 turn.
+        # Fleet at (4,0), 1 ship → speed = 1.0. Planet 1 at (5,0) radius 2.
         state = _state(
             [
                 _planet(0, owner=0, ships=1.0, x=0.0, y=0.0, radius=2.0),
@@ -238,15 +242,15 @@ class TestPhase4StubArrivalDetection:
         )
         combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
         sim._phase_4_advance_fleets(state, combat_lists)
-        # Fleet should be flagged as arriving at planet 1 this turn
+        # Path (4,0)→(5,0) hits planet 1 at (5,0).
         assert len(combat_lists[1]) == 1
         assert combat_lists[1][0].owner == 0
         assert combat_lists[1][0].ships == 1
-        # Fleet should be removed from the in-flight list (it arrived)
         assert state.fleets == []
 
-    def test_in_flight_fleet_not_arriving_unchanged(self):
+    def test_fleet_not_arriving_position_updated(self):
         sim = Simulator()
+        # Fleet at (5,0), 10 ships → speed ≈ 1.96. Planets far away.
         state = _state(
             [
                 _planet(0, owner=0, ships=10.0, x=0.0, y=0.0),
@@ -259,28 +263,97 @@ class TestPhase4StubArrivalDetection:
         )
         combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
         sim._phase_4_advance_fleets(state, combat_lists)
-        # Far from target → not arriving this turn
         assert combat_lists[0] == []
         assert combat_lists[1] == []
-        # Fleet is still in flight (not removed). Day 3-5 stub does NOT
-        # advance the fleet's position; that lands Day 5-7.
         assert len(state.fleets) == 1
+        # Real Phase 4 advances position: speed for 10 ships ≈ 1.96
+        expected_speed = 1.0 + 5.0 * (math.log(10) / math.log(1000)) ** 1.5
+        assert state.fleets[0].x == pytest.approx(5.0 + expected_speed)
+        assert state.fleets[0].y == pytest.approx(0.0)
 
-    def test_fleet_with_no_target_left_in_flight(self):
-        """Fleets spawned in Phase 2 have target_planet_id=-1; stub leaves them in flight."""
+    def test_fleet_oob_removed(self):
+        """Fleet near board edge that walks past BOARD_SIZE=100 is removed."""
         sim = Simulator()
         state = _state(
-            [_planet(0, owner=0, ships=10.0, x=0.0, y=0.0)],
+            [_planet(0, owner=0, ships=10.0, x=0.0, y=50.0)],
             fleets=[SimFleet(
                 id=0, owner=0, from_planet_id=0, target_planet_id=-1,
-                x=0.0, y=0.0, angle=0.5, ships=3, spawned_at_step=0,
+                x=99.5, y=50.0, angle=0.0, ships=1, spawned_at_step=0,
             )],
         )
         combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
         sim._phase_4_advance_fleets(state, combat_lists)
-        # No target_planet_id resolved → stub cannot compute ETA, leaves it in flight
-        assert len(state.fleets) == 1
+        # Fleet walks to x=100.5 → OOB → removed; no combat
+        assert state.fleets == []
         assert combat_lists[0] == []
+
+    def test_fleet_sun_collision_removed(self):
+        """Fleet aimed through the sun (segment crosses SUN_RADIUS=10) is destroyed."""
+        sim = Simulator()
+        # Fleet at (40, 50) heading toward sun center (50, 50). Speed ≥ 10
+        # so segment crosses the sun. Use 1000 ships → speed = MAX_SPEED = 6.
+        # 6 ships speed, segment from (40,50) to (46,50). Distance from
+        # (50,50) to that segment = (50-46) = 4 < SUN_RADIUS=10. Collide.
+        state = _state(
+            [_planet(0, owner=0, ships=10.0, x=0.0, y=0.0)],
+            fleets=[SimFleet(
+                id=0, owner=0, from_planet_id=0, target_planet_id=-1,
+                x=40.0, y=50.0, angle=0.0, ships=1000, spawned_at_step=0,
+            )],
+        )
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_4_advance_fleets(state, combat_lists)
+        assert state.fleets == []
+        assert combat_lists[0] == []
+
+    def test_fleet_first_planet_on_path_wins(self):
+        """When a fleet's path crosses two planets, env breaks on the FIRST
+        match in iteration order (env L549). Mirror that determinism."""
+        sim = Simulator()
+        # Fleet at (0, 50) moving right at speed 6 (1000 ships).
+        # Both planet A at (3, 50) radius 2 and planet B at (5, 50) radius 2
+        # would intersect the segment (0,50)→(6,50). env iterates planets in
+        # list order → planet A wins.
+        state = _state(
+            [
+                _planet(0, owner=0, ships=10.0, x=80.0, y=80.0),  # source, far
+                _planet(1, owner=-1, ships=0.0, x=3.0, y=50.0, radius=2.0),
+                _planet(2, owner=-1, ships=0.0, x=5.0, y=50.0, radius=2.0),
+            ],
+            fleets=[SimFleet(
+                id=0, owner=0, from_planet_id=0, target_planet_id=2,
+                x=0.0, y=50.0, angle=0.0, ships=1000, spawned_at_step=0,
+            )],
+        )
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_4_advance_fleets(state, combat_lists)
+        # Planet 1 (id=1) wins, planet 2 (id=2) gets nothing.
+        assert len(combat_lists[1]) == 1
+        assert combat_lists[2] == []
+        assert state.fleets == []
+
+    def test_fleet_just_spawned_does_not_self_collide(self):
+        """A fleet spawned at planet.edge (Phase 2) walking outward does not
+        hit its own source planet (the LAUNCH_CLEARANCE=0.1 buffer is enough)."""
+        sim = Simulator()
+        # Source planet at (10, 50) radius 2 — well clear of sun at (50,50).
+        # Spawn at (12.1, 50) — just outside source. 1 ship → speed 1.
+        # Walks to (13.1, 50).
+        state = _state(
+            [_planet(0, owner=0, ships=10.0, x=10.0, y=50.0, radius=2.0)],
+            fleets=[SimFleet(
+                id=0, owner=0, from_planet_id=0, target_planet_id=-1,
+                x=12.1, y=50.0, angle=0.0, ships=1, spawned_at_step=0,
+            )],
+        )
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_4_advance_fleets(state, combat_lists)
+        # Source at (10,50), segment (12.1, 50)→(13.1, 50), closest distance
+        # from (10,50) to segment is 2.1 > radius 2.0 → NO collision.
+        # Sun at (50,50) is 36.9 away from segment → no sun collision.
+        assert combat_lists[0] == []
+        assert len(state.fleets) == 1
+        assert state.fleets[0].x == pytest.approx(13.1)
 
 
 class TestSimulatorStepIntegration:
