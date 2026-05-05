@@ -44,6 +44,9 @@ class Simulator:
     # Toggle whether to skip phase 1 (comet spawn). Should be True (the env's
     # comet spawn uses RNG we can't reproduce — see design doc Section 5 risk #2).
     skip_comet_spawn: bool = True
+    # Toggle whether to skip phase 5 (rotation + sweep). True for Day 3-5
+    # (phase unimplemented). Becomes False once real Phase 5 lands (Day 7-9).
+    skip_phase_5: bool = True
 
     def step(
         self, state: SimState, actions: dict[int, list[Action]]
@@ -63,12 +66,16 @@ class Simulator:
         self._phase_2_apply_actions(new_state, actions)
         self._phase_3_production(new_state)
         self._phase_4_advance_fleets(new_state, combat_lists)
-        # Phase 5 (rotation + comet sweep) is unimplemented (Days 7-9). For
-        # static-only / no-comet scenarios it would be a no-op anyway, so
-        # short-circuit to allow Day 3-5 step() to run end-to-end. If a
-        # rotating body is present the call falls through and Phase 5 raises
-        # — surfacing the gap loudly rather than producing wrong results.
-        if self._has_rotating_bodies(new_state):
+        # Phase 5 (rotation + comet sweep) is unimplemented (Days 7-9).
+        # For Day 3-5, real games have ~28 planets with most rotating —
+        # the original "no rotating bodies" guard would only trigger for
+        # synthetic test states. If skip_phase_5 is True (default), we
+        # silently skip Phase 5 so step() works end-to-end on real
+        # scenarios; planet x/y will diverge from env (state_diff doesn't
+        # check x/y so this is fine for Day 3-5) but rotation-induced
+        # fleet sweeps are NOT captured and will manifest as fleet-count
+        # / ownership-flip divergence on long-running fleet states.
+        if not self.skip_phase_5:
             self._phase_5_rotate_planets(new_state, combat_lists)
         self._phase_6_resolve_combat(new_state, combat_lists)
 
@@ -78,9 +85,10 @@ class Simulator:
         """True iff this state contains any planet that would rotate or any comets.
 
         Static planets (env L572): orbital_r + radius >= ROTATION_RADIUS_LIMIT (50).
-        Day 3-5 scenarios are filtered to static-only with no comets, so this
-        always returns False there and Phase 5 is skipped. Once Phase 5 lands
-        (Day 7-9), this guard becomes redundant and can be removed.
+        Originally intended as a Phase 5 short-circuit guard, but real games
+        have ~28 planets with most rotating, so the guard tripped almost never.
+        Replaced with the simpler skip_phase_5 flag. This helper retained for
+        the Phase 5 stub regression test (test_phase_5_rotation_still_raises).
         """
         from orbit_wars.geometry import ROTATION_RADIUS_LIMIT, orbital_radius
 

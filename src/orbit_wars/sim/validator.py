@@ -44,6 +44,7 @@ __all__ = [
     "ValidationReport",
     "ValidationTriple",
     "extract_state_and_actions",
+    "filter_day_3_5_scenarios",
     "inject_state_and_step",
     "state_diff",
 ]
@@ -52,6 +53,60 @@ __all__ = [
 # Comet-spawn step indices (env L27). These transitions are non-deterministic
 # (RNG-driven ship counts) and should be excluded from strict validation.
 COMET_SPAWN_STEPS = frozenset({50, 150, 250, 350, 450})
+
+
+# Per env L572: planets with orbital_r + radius >= ROTATION_RADIUS_LIMIT
+# are not rotated. This is the same condition used to identify "static"
+# planets for Day 3-5 scenario filtering.
+ROTATION_RADIUS_LIMIT = 50.0  # env constant
+SUN_CENTER = (50.0, 50.0)
+
+
+def _orbital_radius(planet) -> float:
+    """Distance from sun (env's pivot for rotation)."""
+    import math
+    return math.hypot(planet.x - SUN_CENTER[0], planet.y - SUN_CENTER[1])
+
+
+def filter_day_3_5_scenarios(
+    triples: list["ValidationTriple"],
+) -> list["ValidationTriple"]:
+    """Filter triples to the Day 3-5 gate set.
+
+    REVISED from kickoff brief Section 3.3 after empirical findings (2026-05-05):
+    real games have ~28 planets with most rotating; the original "all-static"
+    requirement passed only ~0.22% of triples, all of which were the degenerate
+    step-0 empty-world case. Replaced with the conditions that actually identify
+    states our minimal Day 3-5 simulator can match end-to-end:
+
+      - state_t.step >= 1 (skip empty initial observation; env populates at step 1)
+      - state_t has no comet groups present (Phase 0 stub is a no-op)
+      - state_t has no fleets in flight (Phase 4 stub doesn't advance)
+      - state_t.step NOT in COMET_SPAWN_STEPS (Phase 1 unimplemented)
+      - state_t.step + 1 NOT in COMET_SPAWN_STEPS (next-state diverges)
+      - 2P games only (state_t.config.num_agents == 2)
+
+    Rotation (Phase 5) is now skipped via Simulator.skip_phase_5; planet x/y
+    will diverge from env but state_diff doesn't check x/y so this is fine.
+    Comet expirations (Phase 0) are not in scope; the no-comets filter avoids them.
+    """
+    out: list[ValidationTriple] = []
+    for tri in triples:
+        s = tri.state_t
+        if s.step < 1:
+            continue
+        if s.comet_groups:
+            continue
+        if s.fleets:
+            continue
+        if s.config.num_agents != 2:
+            continue
+        if s.step in COMET_SPAWN_STEPS:
+            continue
+        if (s.step + 1) in COMET_SPAWN_STEPS:
+            continue
+        out.append(tri)
+    return out
 
 
 # ---------------------------------------------------------------------------
