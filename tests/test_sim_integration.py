@@ -64,3 +64,60 @@ def test_day_3_5_gate_match_rate_at_least_80_percent():
         f"Day 3-5 gate FAILED: match_rate={report.match_rate:.3f} < 0.80. "
         f"Top mismatch categories: {sorted(report.mismatch_categories.items(), key=lambda kv: -kv[1])[:5]}"
     )
+
+
+# Day 5-7 gate broadens the Day 3-5 gate: filter allows state_t with
+# fleets in flight (real Phase 4 now handles them). All categories EXCEPT
+# fleet-id-set-mismatch are now expected to gate. Phase 5 (rotation +
+# sweep) is still skipped → some mismatches expected from rotation-induced
+# fleet sweeps; we still expect ≥80% match rate.
+GATE_CATEGORIES_DAY_5_7 = {
+    "ownership-flip",
+    "ship-count-off",
+    "step-mismatch",
+    "planet-count-mismatch",
+    "fleet-count-mismatch",
+    "fleet-position-drift",
+    "comet-related",
+}
+
+
+@pytest.mark.slow
+def test_day_5_7_gate_match_rate_at_least_80_percent():
+    """Day 5-7 gate: real Phase 4 lands; broaden filter and gate vs Day 3-5."""
+    from orbit_wars.sim.simulator import Simulator
+    from orbit_wars.sim.validator import (
+        ForwardModelValidator,
+        filter_day_5_7_scenarios,
+    )
+
+    seeds = list(range(10))
+    opponent_pool = ["random", "starter"]
+    opponent_combos = [
+        (opp_a, opp_b)
+        for opp_a in opponent_pool
+        for opp_b in opponent_pool
+    ]
+
+    v = ForwardModelValidator(simulator=Simulator())
+    raw_triples = v.collect_scenarios(
+        seeds=seeds,
+        opponent_pool=opponent_pool,
+        opponent_combos=opponent_combos,
+    )
+    filtered = filter_day_5_7_scenarios(raw_triples)
+    print(f"\nDay 5-7 filter: {len(filtered)} triples from {len(raw_triples)} raw")
+    assert len(filtered) >= 1000, (
+        f"Day 5-7 filter too aggressive: only {len(filtered)} triples from "
+        f"{len(raw_triples)} raw. Expand seeds or loosen filter."
+    )
+
+    report = v.validate(filtered, gate_categories=GATE_CATEGORIES_DAY_5_7)
+    print(f"Day 5-7 gate: n_total={report.n_total}  n_match={report.n_match}  "
+          f"match_rate={report.match_rate:.3f}")
+    print(f"Mismatch categories: {report.mismatch_categories}")
+
+    assert report.match_rate >= 0.80, (
+        f"Day 5-7 gate FAILED: match_rate={report.match_rate:.3f} < 0.80. "
+        f"Top mismatch categories: {sorted(report.mismatch_categories.items(), key=lambda kv: -kv[1])[:5]}"
+    )

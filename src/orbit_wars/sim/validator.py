@@ -45,6 +45,7 @@ __all__ = [
     "ValidationTriple",
     "extract_state_and_actions",
     "filter_day_3_5_scenarios",
+    "filter_day_5_7_scenarios",
     "inject_state_and_step",
     "state_diff",
 ]
@@ -98,6 +99,43 @@ def filter_day_3_5_scenarios(
         if s.comet_groups:
             continue
         if s.fleets:
+            continue
+        if s.config.num_agents != 2:
+            continue
+        if s.step in COMET_SPAWN_STEPS:
+            continue
+        if (s.step + 1) in COMET_SPAWN_STEPS:
+            continue
+        out.append(tri)
+    return out
+
+
+def filter_day_5_7_scenarios(
+    triples: list["ValidationTriple"],
+) -> list["ValidationTriple"]:
+    """Filter triples to the Day 5-7 gate set.
+
+    Broadens Day 3-5 by ALLOWING state_t to have fleets in flight (real
+    Phase 4 now handles fleet movement + collisions). Phase 5 (rotation +
+    sweep) is still skipped, so rotation-induced mismatches remain
+    expected; the gate-categories tuning happens in the integration test.
+
+    Keeps a triple iff ALL hold:
+      - state_t.step >= 1
+      - state_t.comet_groups == []   (Phase 0 stub is no-op)
+      - state_t.config.num_agents == 2
+      - state_t.step NOT in COMET_SPAWN_STEPS
+      - state_t.step + 1 NOT in COMET_SPAWN_STEPS
+
+    Removed (vs Day 3-5):
+      - state_t.fleets == []   (now allowed; real Phase 4 handles them)
+    """
+    out: list[ValidationTriple] = []
+    for tri in triples:
+        s = tri.state_t
+        if s.step < 1:
+            continue
+        if s.comet_groups:
             continue
         if s.config.num_agents != 2:
             continue
