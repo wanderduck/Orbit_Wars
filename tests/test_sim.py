@@ -113,12 +113,23 @@ class TestValidateMove:
         assert validate_move(state, 0, Action(0, 0.5, 11)) is False
 
 
-class TestSimulatorStubs:
-    def test_step_raises_until_phases_implemented(self):
+class TestSimulatorPhaseStubs:
+    def test_phase_1_comet_spawn_still_raises(self):
+        """Phase 1 (comet spawn) intentionally raises NotImplementedError —
+        the env's RNG can't be reproduced; spawn is handled outside the sim."""
         sim = Simulator()
         state = _state([SimPlanet(id=0, x=0, y=0, radius=2, owner=0, ships=10, production=1)])
         with pytest.raises(NotImplementedError):
-            sim.step(state, {})
+            sim._phase_1_comet_spawn(state)
+
+    def test_phase_5_rotation_still_raises(self):
+        """Phase 5 (rotation + sweep) lands Day 7-9; should still raise when
+        called directly. step() guards via _has_rotating_bodies for Day 3-5
+        scenarios, but the phase method itself remains unimplemented."""
+        sim = Simulator()
+        state = _state([SimPlanet(id=0, x=0, y=0, radius=2, owner=0, ships=10, production=1)])
+        with pytest.raises(NotImplementedError):
+            sim._phase_5_rotate_planets(state, {})
 
 
 class TestValidatorBasic:

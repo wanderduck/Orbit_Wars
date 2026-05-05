@@ -63,10 +63,33 @@ class Simulator:
         self._phase_2_apply_actions(new_state, actions)
         self._phase_3_production(new_state)
         self._phase_4_advance_fleets(new_state, combat_lists)
-        self._phase_5_rotate_planets(new_state, combat_lists)
+        # Phase 5 (rotation + comet sweep) is unimplemented (Days 7-9). For
+        # static-only / no-comet scenarios it would be a no-op anyway, so
+        # short-circuit to allow Day 3-5 step() to run end-to-end. If a
+        # rotating body is present the call falls through and Phase 5 raises
+        # — surfacing the gap loudly rather than producing wrong results.
+        if self._has_rotating_bodies(new_state):
+            self._phase_5_rotate_planets(new_state, combat_lists)
         self._phase_6_resolve_combat(new_state, combat_lists)
 
         return new_state
+
+    def _has_rotating_bodies(self, state: SimState) -> bool:
+        """True iff this state contains any planet that would rotate or any comets.
+
+        Static planets (env L572): orbital_r + radius >= ROTATION_RADIUS_LIMIT (50).
+        Day 3-5 scenarios are filtered to static-only with no comets, so this
+        always returns False there and Phase 5 is skipped. Once Phase 5 lands
+        (Day 7-9), this guard becomes redundant and can be removed.
+        """
+        from orbit_wars.geometry import ROTATION_RADIUS_LIMIT, orbital_radius
+
+        if state.comet_groups:
+            return True
+        for p in state.planets:
+            if orbital_radius(p.x, p.y) + p.radius < ROTATION_RADIUS_LIMIT:
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Phases — stubs. Land per design doc Section 4 build order.

@@ -275,3 +275,36 @@ class TestPhase4StubArrivalDetection:
         # No target_planet_id resolved → stub cannot compute ETA, leaves it in flight
         assert len(state.fleets) == 1
         assert combat_lists[0] == []
+
+
+class TestSimulatorStepIntegration:
+    def test_step_runs_end_to_end_on_static_2p_state(self):
+        """End-to-end step() on a Day-3-5-shaped scenario (static planets, 2P, no comets).
+
+        Static planet positions chosen so they pass the gate filter:
+            (5,5) → orbital_r + radius ≈ 65.6 >= 50 ✓
+            (95,95) → same ✓
+        """
+        sim = Simulator()
+        state = _state([
+            _planet(0, owner=0, ships=10.0, x=5.0, y=5.0),
+            _planet(1, owner=1, ships=10.0, x=95.0, y=95.0),
+        ])
+        actions = {
+            0: [Action(from_planet_id=0, angle=0.5, ships=3)],
+            1: [],
+        }
+        new_state = sim.step(state, actions)
+        # Step incremented
+        assert new_state.step == state.step + 1
+        # Phase order: Phase 2 (apply actions) → Phase 3 (production) → Phase 4 → Phase 6.
+        # Player 0 launched 3 ships from planet 0 (10 → 7), then production +1 = 8.
+        assert new_state.planets[0].ships == 8.0
+        # Player 1 didn't act; production +1 → 11
+        assert new_state.planets[1].ships == 11.0
+        # New fleet exists. target_planet_id=-1 (Phase 2 doesn't derive target),
+        # so Phase 4 stub leaves it in flight.
+        assert len(new_state.fleets) == 1
+        f = new_state.fleets[0]
+        assert f.owner == 0
+        assert f.ships == 3
