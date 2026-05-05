@@ -121,11 +121,13 @@ class TestSimulatorStubs:
             sim.step(state, {})
 
 
-class TestValidatorStubs:
-    def test_validate_raises_until_simulator_implemented(self):
+class TestValidatorBasic:
+    def test_validate_returns_empty_report_on_no_triples(self):
         v = ForwardModelValidator(simulator=Simulator())
-        with pytest.raises(NotImplementedError):
-            v.validate([])
+        report = v.validate([])
+        assert report.n_total == 0
+        assert report.n_match == 0
+        assert report.match_rate == 0.0
 
 
 class TestExtractAndInject:

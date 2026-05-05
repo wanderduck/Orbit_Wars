@@ -97,3 +97,110 @@ class TestStateDiff:
         expected = _state([_planet(0, owner=1, ships=15.0)], step=6)
         diff = state_diff(actual, expected)
         assert set(diff.keys()) >= {"ownership-flip", "ship-count-off", "step-mismatch"}
+
+
+class TestForwardModelValidator:
+    def test_validate_returns_match_rate_with_identity_sim(self):
+        from orbit_wars.sim.validator import (
+            ForwardModelValidator,
+            ValidationTriple,
+        )
+
+        s_t = _state([_planet(0, owner=0, ships=10.0)], step=5)
+        s_t1 = _state([_planet(0, owner=0, ships=11.0)], step=6)  # production +1
+
+        # IdentitySim that always returns s_t1 — guaranteed match.
+        class IdentitySim:
+            def step(self, state, actions):
+                return s_t1
+
+        triples = [
+            ValidationTriple(
+                state_t=s_t,
+                actions_t={0: [], 1: []},
+                expected_state_t1=s_t1,
+                source_seed=0,
+                source_step=5,
+            )
+        ]
+        v = ForwardModelValidator(simulator=IdentitySim())
+        report = v.validate(triples)
+        assert report.n_total == 1
+        assert report.n_match == 1
+        assert report.match_rate == 1.0
+
+    def test_validate_categorizes_mismatch_with_stub_sim(self):
+        from orbit_wars.sim.validator import (
+            ForwardModelValidator,
+            ValidationTriple,
+        )
+
+        s_t = _state([_planet(0, owner=0, ships=10.0)], step=5)
+        s_t1_real = _state([_planet(0, owner=1, ships=10.0)], step=6)  # ownership flip
+        s_t1_pred = _state([_planet(0, owner=0, ships=10.0)], step=6)  # sim says no flip
+
+        class WrongSim:
+            def step(self, state, actions):
+                return s_t1_pred
+
+        triples = [
+            ValidationTriple(
+                state_t=s_t,
+                actions_t={0: [], 1: []},
+                expected_state_t1=s_t1_real,
+                source_seed=0,
+                source_step=5,
+            )
+        ]
+        v = ForwardModelValidator(simulator=WrongSim())
+        report = v.validate(triples)
+        assert report.n_total == 1
+        assert report.n_match == 0
+        assert report.mismatch_categories.get("ownership-flip", 0) == 1
+
+    def test_validate_skips_categories_when_gate_filter_applied(self):
+        from orbit_wars.sim.validator import (
+            ForwardModelValidator,
+            ValidationTriple,
+        )
+
+        s_t = _state(
+            [_planet(0, owner=0, ships=10.0)],
+            fleets=[SimFleet(id=0, owner=0, from_planet_id=0, target_planet_id=1,
+                             x=5.0, y=5.0, angle=0.0, ships=3, spawned_at_step=0)],
+            step=5,
+        )
+        s_t1_real = _state(
+            [_planet(0, owner=0, ships=11.0)],  # production
+            fleets=[SimFleet(id=0, owner=0, from_planet_id=0, target_planet_id=1,
+                             x=11.0, y=5.0, angle=0.0, ships=3, spawned_at_step=0)],
+            step=6,
+        )
+        s_t1_pred = _state(
+            [_planet(0, owner=0, ships=11.0)],  # production correct
+            fleets=[SimFleet(id=0, owner=0, from_planet_id=0, target_planet_id=1,
+                             x=5.0, y=5.0, angle=0.0, ships=3, spawned_at_step=0)],  # NOT moved
+            step=6,
+        )
+
+        class StubSim:
+            def step(self, state, actions):
+                return s_t1_pred
+
+        triples = [
+            ValidationTriple(
+                state_t=s_t,
+                actions_t={0: [], 1: []},
+                expected_state_t1=s_t1_real,
+                source_seed=0,
+                source_step=5,
+            )
+        ]
+        # Default gate (all categories) → mismatch (fleet-position-drift)
+        v = ForwardModelValidator(simulator=StubSim())
+        report_default = v.validate(triples)
+        assert report_default.n_match == 0
+
+        # Day-3-5 gate (ignore fleet-position-drift) → match
+        report_d35 = v.validate(triples, gate_categories={"ownership-flip", "ship-count-off", "step-mismatch", "planet-count-mismatch", "fleet-count-mismatch", "comet-related"})
+        assert report_d35.n_match == 1

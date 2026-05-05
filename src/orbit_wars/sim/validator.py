@@ -394,17 +394,52 @@ class ForwardModelValidator:
                     ))
         return triples
 
-    def validate(self, triples: list[ValidationTriple]) -> ValidationReport:
-        """Run Simulator.step on each triple and compare to expected.
+    def validate(
+        self,
+        triples: list[ValidationTriple],
+        *,
+        gate_categories: set[str] | None = None,
+    ) -> ValidationReport:
+        """Run Simulator.step on each triple; compare to expected.
 
-        Currently only checks Simulator-side. Once Path C-env vs Path C-original
-        is decided, can also support env-as-reference validation
-        (use inject_state_and_step as the reference instead of triple's expected).
+        `gate_categories`, when provided, is the set of mismatch categories
+        that count toward "did this triple match" — categories OUTSIDE this
+        set are recorded in mismatch_categories aggregates but do NOT
+        disqualify a triple. Default = all categories matter.
 
-        Lands progressively as Simulator phases come online (Days 3-11).
+        Used for Day 3-5 to ignore "fleet-position-drift" (the Phase 4 stub
+        doesn't move fleets) while still gating on planet-side correctness.
         """
-        raise NotImplementedError(
-            "validate() depends on Simulator.step being implemented (Days 3-11)."
+        n_match = 0
+        mismatches: list[tuple[ValidationTriple, dict]] = []
+        category_totals: dict[str, int] = {}
+
+        for tri in triples:
+            actual = self.simulator.step(tri.state_t, tri.actions_t)
+            diff = state_diff(
+                actual,
+                tri.expected_state_t1,
+                pos_tolerance=self.pos_tolerance,
+                ship_tolerance=self.ship_tolerance,
+            )
+            for cat, count in diff.items():
+                category_totals[cat] = category_totals.get(cat, 0) + count
+
+            if gate_categories is None:
+                gating_diff = diff
+            else:
+                gating_diff = {k: v for k, v in diff.items() if k in gate_categories}
+
+            if not gating_diff:
+                n_match += 1
+            else:
+                mismatches.append((tri, diff))
+
+        return ValidationReport(
+            n_total=len(triples),
+            n_match=n_match,
+            mismatches=mismatches[:50],
+            mismatch_categories=category_totals,
         )
 
     def save_scenarios(self, triples: list[ValidationTriple], path: Path) -> None:
