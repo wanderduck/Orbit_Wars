@@ -113,6 +113,18 @@ class Simulator:
     def _phase_6_resolve_combat(
         self, state: SimState, combat_lists: dict[int, list]
     ) -> None:
-        """env L630-669: per planet, group arrivals by owner; top-2 cancel;
-        survivor fights garrison. Reuses world.resolve_arrival_event. Day 3-5."""
-        raise NotImplementedError("Phase 6 (resolve combat) lands Day 3-5")
+        """env L630-669: per planet, group arrivals by owner; top-2 cancel; survivor fights garrison.
+
+        Reuses world.resolve_arrival_event for the actual combat math.
+        """
+        from orbit_wars.world import resolve_arrival_event
+
+        for planet in state.planets:
+            arrivals = combat_lists.get(planet.id, [])
+            if not arrivals:
+                continue
+            new_owner, new_ships = resolve_arrival_event(
+                planet.owner, planet.ships, arrivals,
+            )
+            planet.owner = new_owner
+            planet.ships = new_ships
