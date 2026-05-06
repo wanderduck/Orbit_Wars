@@ -1994,8 +1994,8 @@ wheels = [
 
 [[package]]
 name = "kaggle-environments"
-version = "1.28.1"
-source = { registry = "https://pypi.org/simple" }
+version = "1.29.0"
+source = { git = "https://github.com/Kaggle/kaggle-environments.git?rev=master#6458c3191c2c4b37b6ad7530bd027df4b35369e4" }
 dependencies = [
     { name = "flask" },
     { name = "google-auth" },
@@ -2016,10 +2016,6 @@ dependencies = [
     { name = "tenacity" },
     { name = "termcolor" },
     { name = "transformers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/84/0c/bece183a052394a3488d11d16197e695bb6d58bb72ba352b51df29435272/kaggle_environments-1.28.1.tar.gz", hash = "sha256:13034128ac944e2d45a0054b886a541cedba23f324817f6c4138926ac41b9335", size = 13225106, upload-time = "2026-04-20T23:40:11.048Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/1f/27dce3e63d819a71c424c1b8f2723c9c9e3f4e9a265e650ac1071cb4460a/kaggle_environments-1.28.1-py3-none-any.whl", hash = "sha256:6605259ce8b2ab971be6fd01fc7174716074858f38756d5a1b39a5e3b70a447d", size = 13329780, upload-time = "2026-04-20T23:40:08.142Z" },
 ]
 
 [[package]]
@@ -3137,21 +3133,21 @@ wheels = [
 
 [[package]]
 name = "open-spiel"
-version = "1.6.12"
+version = "1.6.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
     { name = "attrs" },
     { name = "ml-collections" },
     { name = "numpy" },
-    { name = "pip" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/67/92/c890eddf631e764bb3a684aee21513e6b9e18733f6c0ccca48803cc01ffa/open_spiel-1.6.12.tar.gz", hash = "sha256:e8f6437f65f6bf7455e78d447dadb1604d125ead6f541bd7f0572801ad302e3e", size = 5497388, upload-time = "2026-03-16T14:56:07.985Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/7b/ecac49a9cb4fa5965e5c7dd3f7b779c888daa8c16524f281ae29bcc86523/open_spiel-1.6.13.tar.gz", hash = "sha256:5d7ea172e2edae5bfa7b26d084278ba4b872ae17c11ba3de9c9346fb7dd30813", size = 5556479, upload-time = "2026-05-01T12:55:58.053Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/38/20/f69b3694fe80830579dc2368ed397cac0d0acb47fd0cfd1db4199ea2c77f/open_spiel-1.6.12-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5a2ea5a55d8dd455bdfb3ee30f174834450f17d6d9a0ae53ca06fe1ba0c9d905", size = 6581889, upload-time = "2026-03-16T14:56:00.678Z" },
-    { url = "https://files.pythonhosted.org/packages/3f/0a/9bb9ab5d0c2b45fff481fa464e0c1d09ab53c986af0bc3e7eeca78c0f041/open_spiel-1.6.12-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9ae7de84af40f9bcb18a704439842fb5fc5cd02a77f5002e483d67a3218dfde2", size = 7840683, upload-time = "2026-03-16T14:56:02.025Z" },
-    { url = "https://files.pythonhosted.org/packages/8f/06/0b51a4b1430bd6e057a199973feec6436bd6ecdb3288a7519f36b16b143b/open_spiel-1.6.12-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b85bbff50f8748a6889de78b592cc076ce1a4660ae8dc79801a8fa08c808a7f9", size = 8490361, upload-time = "2026-03-16T15:02:22.976Z" },
+    { url = "https://files.pythonhosted.org/packages/58/a5/7a8b35679ea0250204b8daf5673ad42eb27c0e57af254408921f785741a6/open_spiel-1.6.13-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:472ade7d8f0bdf4101ccaf3ad8ea16a680ebae21797fc781fd8e5c60ebf921db", size = 12489709, upload-time = "2026-05-01T12:55:34.666Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/22/ceb7605f04d2e8a16158af23c4e553eb00cf8fef11b171e3368e4ef1365b/open_spiel-1.6.13-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8b90a2c0126702c1e25f8a04d472ba94b1ab96993447ecaac2d9727d243f2f67", size = 14718744, upload-time = "2026-05-01T12:55:36.822Z" },
+    { url = "https://files.pythonhosted.org/packages/87/2f/e1ac1fb8d3cbdd28cd835e8b51cda49790e4487ded1c2224f7480cdc0377/open_spiel-1.6.13-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:90ed74cb98c36ecae693e98e4aa974058eff69f07222d99f1b9b1578a75b3464", size = 15465581, upload-time = "2026-05-01T12:55:39.465Z" },
+    { url = "https://files.pythonhosted.org/packages/80/6a/dbf90712f46efeec61bd4d021754f6a6508ddd60607d64e4903c383629e2/open_spiel-1.6.13-cp313-cp313-win_amd64.whl", hash = "sha256:0146f31fa2f93cd9f5f95a363eed6a4cdada5cb375662961f5ed728e0ae0327f", size = 10093362, upload-time = "2026-05-01T12:55:54.071Z" },
 ]
 
 [[package]]
@@ -3340,7 +3336,7 @@ requires-dist = [
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "jupyterlab", specifier = ">=4.5.5" },
     { name = "kaggle", specifier = ">=2.0.2" },
-    { name = "kaggle-environments", specifier = ">=1.28.1" },
+    { name = "kaggle-environments", git = "https://github.com/Kaggle/kaggle-environments.git?rev=master" },
     { name = "kagglehub", specifier = ">=1.0.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "modal", specifier = ">=1.4.2" },
@@ -3549,15 +3545,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/83/43/6f732ff85743cf746b1361b91665d9f5155e1483817f693f8d57ea93147f/pillow-12.1.1-cp313-cp313t-win32.whl", hash = "sha256:44ce27545b6efcf0fdbdceb31c9a5bdea9333e664cda58a7e674bb74608b3986", size = 6336441, upload-time = "2026-02-11T04:21:48.22Z" },
     { url = "https://files.pythonhosted.org/packages/3b/44/e865ef3986611bb75bfabdf94a590016ea327833f434558801122979cd0e/pillow-12.1.1-cp313-cp313t-win_amd64.whl", hash = "sha256:a285e3eb7a5a45a2ff504e31f4a8d1b12ef62e84e5411c6804a42197c1cf586c", size = 7045383, upload-time = "2026-02-11T04:21:50.015Z" },
     { url = "https://files.pythonhosted.org/packages/a8/c6/f4fb24268d0c6908b9f04143697ea18b0379490cb74ba9e8d41b898bd005/pillow-12.1.1-cp313-cp313t-win_arm64.whl", hash = "sha256:cc7d296b5ea4d29e6570dabeaed58d31c3fea35a633a69679fb03d7664f43fb3", size = 2456104, upload-time = "2026-02-11T04:21:51.633Z" },
-]
-
-[[package]]
-name = "pip"
-version = "26.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/73/7e/d2b04004e1068ad4fdfa2f227b839b5d03e602e47cdbbf49de71137c9546/pip-26.1.tar.gz", hash = "sha256:81e13ebcca3ffa8cc85e4deff5c27e1ee26dea0aa7fc2f294a073ac208806ff3", size = 1840316, upload-time = "2026-04-26T21:00:05.406Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/70/7a/be4bd8bcbb24ea475856dd68159d78b03b2bb53dae369f69c9606b8888f5/pip-26.1-py3-none-any.whl", hash = "sha256:4e8486d821d814b77319acb7b9e8bf5a4ee7590a643e7cb21029f209be8573c1", size = 1812804, upload-time = "2026-04-26T21:00:03.194Z" },
 ]
 
 [[package]]

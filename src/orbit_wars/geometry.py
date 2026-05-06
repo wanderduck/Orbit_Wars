@@ -76,6 +76,43 @@ def fleet_speed(ships: float | int) -> float:
     return 1.0 + (MAX_SPEED - 1.0) * (ratio**1.5)
 
 
+def swept_pair_hit(
+    A: tuple[float, float],
+    B: tuple[float, float],
+    P0: tuple[float, float],
+    P1: tuple[float, float],
+    r: float,
+) -> bool:
+    """Continuous-collision check between two moving objects in one tick.
+
+    True iff a fleet moving A→B and a planet moving P0→P1 come within
+    `r` of each other for some t in [0, 1]. Linearises both motions over
+    the tick (planet rotation is approximated as its chord).
+
+    Mirrors env's helper of the same name (env L46-66, master commit
+    6458c31). Required for env-faithful Phase 4: a fleet's path may cross
+    a planet's old position WITHOUT actually colliding if the planet
+    rotates away from the fleet during the same tick. Conversely a fleet
+    may be caught by a planet's swept arc even though the fleet's segment
+    doesn't pass through the planet's old position.
+    """
+    d0x, d0y = A[0] - P0[0], A[1] - P0[1]
+    dvx = (B[0] - A[0]) - (P1[0] - P0[0])
+    dvy = (B[1] - A[1]) - (P1[1] - P0[1])
+    a = dvx * dvx + dvy * dvy
+    b = 2.0 * (d0x * dvx + d0y * dvy)
+    c = d0x * d0x + d0y * d0y - r * r
+    if a < 1e-12:
+        return c <= 0.0
+    disc = b * b - 4.0 * a * c
+    if disc < 0.0:
+        return False
+    sq = math.sqrt(disc)
+    t1 = (-b - sq) / (2.0 * a)
+    t2 = (-b + sq) / (2.0 * a)
+    return t2 >= 0.0 and t1 <= 1.0
+
+
 def point_to_segment_distance(
     point: tuple[float, float],
     seg_start: tuple[float, float],

@@ -57,16 +57,23 @@ class Simulator:
         self._phase_0_comet_expiration(new_state)
         if not self.skip_comet_spawn:
             self._phase_1_comet_spawn(new_state)
-        # combat_lists carries arrivals from phase 4 + phase 5 into phase 6
-        combat_lists: dict[int, list] = {p.id: [] for p in new_state.planets}
         self._phase_2_apply_actions(new_state, actions)
         self._phase_3_production(new_state)
-        self._phase_4_advance_fleets(new_state, combat_lists)
-        self._phase_5_rotate_planets(new_state, combat_lists)
+
+        # Pre-compute end-of-tick planet positions (rotating planets +
+        # comet path advancement) so fleet movement can use a swept-pair
+        # check that accounts for both bodies moving in the same tick.
+        # Mirrors master env (commit 6458c31) restructure of Phases 4-5.
+        planet_paths, expired_comet_pids = self._compute_planet_paths(new_state)
+
+        # combat_lists carries arrivals from swept-pair collisions into phase 6
+        combat_lists: dict[int, list] = {p.id: [] for p in new_state.planets}
+        self._phase_4_advance_fleets(new_state, planet_paths, combat_lists)
+        self._phase_5_apply_planet_movement(new_state, planet_paths, expired_comet_pids)
         self._phase_6_resolve_combat(new_state, combat_lists)
 
         # Step increments LAST (matches env semantics: env reads obs.step
-        # for Phase 5 rotation BEFORE incrementing; see env L555).
+        # for planet rotation BEFORE incrementing).
         new_state.step += 1
         return new_state
 
@@ -154,20 +161,90 @@ class Simulator:
             if p.owner != -1:
                 p.ships += p.production
 
+    def _compute_planet_paths(
+        self, state: SimState
+    ) -> tuple[dict[int, tuple[tuple[float, float], tuple[float, float], bool]], set[int]]:
+        """Pre-compute end-of-tick positions for all planets and comets.
+
+        Returns (planet_paths, expired_comet_pids):
+          - planet_paths[pid] = (old_pos, new_pos, check_collision)
+            check_collision=False means the body shouldn't be tested against
+            fleets this tick (used for first-placement comet spawns where
+            old_pos is the off-board placeholder x=-99).
+          - expired_comet_pids = comets whose path_index reached path length
+            this tick. They stay at old_pos for the tick (so any in-progress
+            collision can still resolve), then get removed in Phase 5.
+
+        Mirrors master env Phase 2 (commit 6458c31).
+        """
+        import math
+        from orbit_wars.geometry import ROTATION_RADIUS_LIMIT, SUN_CENTER
+
+        initial_by_id = {p.id: p for p in state.initial_planets}
+        planet_paths: dict[int, tuple[tuple[float, float], tuple[float, float], bool]] = {}
+
+        # Regular planets (non-comet): rotate if not static.
+        for planet in state.planets:
+            if planet.is_comet:
+                continue
+            old_pos = (planet.x, planet.y)
+            new_pos = old_pos
+            initial_p = initial_by_id.get(planet.id)
+            if initial_p is not None:
+                dx = initial_p.x - SUN_CENTER[0]
+                dy = initial_p.y - SUN_CENTER[1]
+                r = math.sqrt(dx * dx + dy * dy)
+                if r + planet.radius < ROTATION_RADIUS_LIMIT:
+                    initial_angle = math.atan2(dy, dx)
+                    current_angle = initial_angle + state.angular_velocity * state.step
+                    new_pos = (
+                        SUN_CENTER[0] + r * math.cos(current_angle),
+                        SUN_CENTER[1] + r * math.sin(current_angle),
+                    )
+            planet_paths[planet.id] = (old_pos, new_pos, True)
+
+        # Comets: advance path_index, look up path[idx] OR mark expired.
+        expired_comet_pids: set[int] = set()
+        for group in state.comet_groups:
+            group.path_index += 1
+            idx = group.path_index
+            for i, pid in enumerate(group.planet_ids):
+                planet = state.planet_by_id(pid)
+                if planet is None:
+                    continue
+                p_path = group.paths[i]
+                old_pos = (planet.x, planet.y)
+                if idx >= len(p_path):
+                    expired_comet_pids.add(pid)
+                    # Comet stays put this tick; removed after combat.
+                    planet_paths[pid] = (old_pos, old_pos, True)
+                else:
+                    new_pos = (p_path[idx][0], p_path[idx][1])
+                    # First placement uses an off-board placeholder for old_pos.
+                    check = old_pos[0] >= 0
+                    planet_paths[pid] = (old_pos, new_pos, check)
+
+        return planet_paths, expired_comet_pids
+
     def _phase_4_advance_fleets(
-        self, state: SimState, combat_lists: dict[int, list]
+        self,
+        state: SimState,
+        planet_paths: dict[int, tuple[tuple[float, float], tuple[float, float], bool]],
+        combat_lists: dict[int, list],
     ) -> None:
-        """env L519-551: advance each fleet by speed; remove on OOB, sun
-        collision, or planet collision (continuous via point-to-segment).
+        """env master Phase 3 (commit 6458c31): fleet movement with continuous
+        swept-pair collision detection.
 
         For each fleet, in env iteration order:
           1. Update position by (cos(angle), sin(angle)) * fleet_speed(ships)
-          2. If new position is outside [0, BOARD_SIZE]^2 → remove (no combat)
-          3. If segment from old→new passes within SUN_RADIUS of sun → remove
-          4. Iterate planets IN ORDER: if segment passes within planet.radius
-             of any planet, push ArrivalEvent to combat_lists[that planet.id],
-             remove the fleet, and BREAK (first match wins, per env L549)
-          5. Otherwise survive with updated position
+          2. Iterate planets IN ORDER: if swept_pair_hit between fleet's
+             segment AND that planet's pre-computed segment, push ArrivalEvent
+             to combat_lists[planet.id], remove fleet, BREAK (first match wins).
+          3. If no planet hit: check OOB → remove silently; check sun → remove
+             silently. Note ORDER: planets first, then OOB+sun (env L511-513
+             comment: "Check planets first so fast fleets that would overshoot
+             the bounds or sun still get credit for hitting a planet along
+             the way.")
         """
         import math
         from orbit_wars.geometry import (
@@ -176,6 +253,7 @@ class Simulator:
             SUN_RADIUS,
             fleet_speed,
             point_to_segment_distance,
+            swept_pair_hit,
         )
         from orbit_wars.world import ArrivalEvent
 
@@ -187,19 +265,14 @@ class Simulator:
             new_y = fleet.y + math.sin(fleet.angle) * speed
             new_pos = (new_x, new_y)
 
-            # Out-of-bounds: removed silently (no combat).
-            if not (0 <= new_x <= BOARD_SIZE and 0 <= new_y <= BOARD_SIZE):
-                continue
-
-            # Sun collision: removed silently (no combat).
-            if point_to_segment_distance(SUN_CENTER, old_pos, new_pos) < SUN_RADIUS:
-                continue
-
-            # Planet collision (any planet on path) — first match wins.
+            # Planet collision (any planet on path) — swept-pair, first match wins.
             collided = False
             for planet in state.planets:
-                planet_pos = (planet.x, planet.y)
-                if point_to_segment_distance(planet_pos, old_pos, new_pos) < planet.radius:
+                path = planet_paths.get(planet.id)
+                if path is None or not path[2]:
+                    continue
+                p_old, p_new, _ = path
+                if swept_pair_hit(old_pos, new_pos, p_old, p_new, planet.radius):
                     combat_lists.setdefault(planet.id, []).append(
                         ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
                     )
@@ -209,102 +282,37 @@ class Simulator:
             if collided:
                 continue
 
+            # Out-of-bounds: removed silently (no combat).
+            if not (0 <= new_x <= BOARD_SIZE and 0 <= new_y <= BOARD_SIZE):
+                continue
+
+            # Sun collision: removed silently (no combat).
+            if point_to_segment_distance(SUN_CENTER, old_pos, new_pos) < SUN_RADIUS:
+                continue
+
             # Survived: commit new position.
             fleet.x = new_x
             fleet.y = new_y
             remaining_fleets.append(fleet)
         state.fleets = remaining_fleets
 
-    def _phase_5_rotate_planets(
-        self, state: SimState, combat_lists: dict[int, list]
+    def _phase_5_apply_planet_movement(
+        self,
+        state: SimState,
+        planet_paths: dict[int, tuple[tuple[float, float], tuple[float, float], bool]],
+        expired_comet_pids: set[int],
     ) -> None:
-        """env L553-627: rotate orbiting planets and sweep fleets caught in arc.
+        """env master Phase 4 (commit 6458c31): apply pre-computed planet
+        positions, then drop expired comets.
 
-        For each non-comet planet:
-          - Compute initial radius r and initial_angle from initial_planets
-          - If r + radius < ROTATION_RADIUS_LIMIT: rotate to
-              new_pos = CENTER + r * (cos(initial_angle + ang_vel * step),
-                                      sin(initial_angle + ang_vel * step))
-          - sweep_fleets(planet, old_pos, new_pos) — if old==new, no-op;
-            else for each fleet not yet swept this turn, check if fleet's
-            position is within planet.radius of the swept segment; if so,
-            push to combat_lists[planet.id] and mark fleet swept
-
-        Comet movement (env L592-611) is NOT handled here — Day 9-11 work.
+        Sweep is ALREADY handled by the swept-pair check in Phase 4 — this
+        method just commits the new positions.
         """
-        import math
-        from orbit_wars.geometry import ROTATION_RADIUS_LIMIT, SUN_CENTER, point_to_segment_distance
-        from orbit_wars.world import ArrivalEvent
-
-        initial_by_id = {p.id: p for p in state.initial_planets}
-        swept_fleet_ids: set[int] = set()
-
         for planet in state.planets:
-            if planet.is_comet:
-                continue
-            initial_p = initial_by_id.get(planet.id)
-            if initial_p is None:
-                continue
+            path = planet_paths.get(planet.id)
+            if path is not None:
+                planet.x, planet.y = path[1]
 
-            dx = initial_p.x - SUN_CENTER[0]
-            dy = initial_p.y - SUN_CENTER[1]
-            r = math.sqrt(dx * dx + dy * dy)
-            old_pos = (planet.x, planet.y)
-
-            if r + planet.radius < ROTATION_RADIUS_LIMIT:
-                initial_angle = math.atan2(dy, dx)
-                current_angle = initial_angle + state.angular_velocity * state.step
-                planet.x = SUN_CENTER[0] + r * math.cos(current_angle)
-                planet.y = SUN_CENTER[1] + r * math.sin(current_angle)
-
-            new_pos = (planet.x, planet.y)
-
-            # sweep_fleets — env L559-568
-            if old_pos == new_pos:
-                continue
-            for fleet in state.fleets:
-                if fleet.id in swept_fleet_ids:
-                    continue
-                if point_to_segment_distance((fleet.x, fleet.y), old_pos, new_pos) < planet.radius:
-                    combat_lists.setdefault(planet.id, []).append(
-                        ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
-                    )
-                    swept_fleet_ids.add(fleet.id)
-
-        # Comet movement along pre-computed paths — env L592-611.
-        # Comets share the swept_fleet_ids set with planet rotation, so a
-        # fleet swept by a planet is not also swept by a comet.
-        expired_comet_pids: set[int] = set()
-        for group in state.comet_groups:
-            group.path_index += 1
-            idx = group.path_index
-            for i, pid in enumerate(group.planet_ids):
-                planet = state.planet_by_id(pid)
-                if planet is None:
-                    continue
-                p_path = group.paths[i]
-                if idx >= len(p_path):
-                    expired_comet_pids.add(pid)
-                    continue
-                old_pos = (planet.x, planet.y)
-                planet.x = p_path[idx][0]
-                planet.y = p_path[idx][1]
-                # Skip sweep on first placement (off-board placeholder x=-99)
-                if old_pos[0] < 0:
-                    continue
-                new_pos = (planet.x, planet.y)
-                if old_pos == new_pos:
-                    continue
-                for fleet in state.fleets:
-                    if fleet.id in swept_fleet_ids:
-                        continue
-                    if point_to_segment_distance((fleet.x, fleet.y), old_pos, new_pos) < planet.radius:
-                        combat_lists.setdefault(planet.id, []).append(
-                            ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
-                        )
-                        swept_fleet_ids.add(fleet.id)
-
-        # Remove expired comets — same pattern as Phase 0 (env L605-611).
         if expired_comet_pids:
             state.planets = [p for p in state.planets if p.id not in expired_comet_pids]
             state.initial_planets = [
@@ -315,9 +323,6 @@ class Simulator:
                     pid for pid in group.planet_ids if pid not in expired_comet_pids
                 ]
             state.comet_groups = [g for g in state.comet_groups if g.planet_ids]
-
-        if swept_fleet_ids:
-            state.fleets = [f for f in state.fleets if f.id not in swept_fleet_ids]
 
     def _phase_6_resolve_combat(
         self, state: SimState, combat_lists: dict[int, list]
