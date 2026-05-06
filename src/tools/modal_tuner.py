@@ -561,7 +561,7 @@ PROFILES: dict[str, tuple[int, int, int, float]] = {
     "smoke":       (4,   1,  4,   0.20),
     "iteration":   (20,  15, 33,  50.0),
     "default":     (50,  15, 33,  130.0),
-    "extended":    (50,  30, 33,  260.0),
+    "extended":    (77,  42, 69,  260.0),
     "max-quality": (100, 30, 33,  500.0),
 }
 
