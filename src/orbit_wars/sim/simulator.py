@@ -78,12 +78,31 @@ class Simulator:
     def _phase_0_comet_expiration(self, state: SimState) -> None:
         """env L419-439: drop comets where path_index >= len(path).
 
-        Day 3-5 scenarios are filtered to exclude comets; this is a no-op
-        for now. Real implementation lands Day 9-11. If a comet appears
-        here despite the filter, the validator's diff will catch it under
-        'comet-related'.
+        For each comet group, identify planet_ids whose path_index has
+        reached path length (path consumed). Remove those from:
+          - state.planets
+          - state.initial_planets
+          - state.comet_groups[*].planet_ids
+          - empty groups themselves
         """
-        return
+        expired_pids: set[int] = set()
+        for group in state.comet_groups:
+            for i, pid in enumerate(group.planet_ids):
+                if group.path_index >= len(group.paths[i]):
+                    expired_pids.add(pid)
+
+        if not expired_pids:
+            return
+
+        state.planets = [p for p in state.planets if p.id not in expired_pids]
+        state.initial_planets = [
+            p for p in state.initial_planets if p.id not in expired_pids
+        ]
+        for group in state.comet_groups:
+            group.planet_ids = [
+                pid for pid in group.planet_ids if pid not in expired_pids
+            ]
+        state.comet_groups = [g for g in state.comet_groups if g.planet_ids]
 
     def _phase_1_comet_spawn(self, state: SimState) -> None:
         """env L441-477: spawn at COMET_SPAWN_STEPS=[50,150,250,350,450].

@@ -356,6 +356,109 @@ class TestPhase4FleetMovement:
         assert state.fleets[0].x == pytest.approx(13.1)
 
 
+class TestPhase0CometExpiration:
+    """Real Phase 0 (Day 9-11): comet expiration per env L419-439."""
+
+    def _make_state_with_comet_group(self, *, planet_ids, paths, path_index, real_planet_ids=()):
+        from orbit_wars.sim.state import SimCometGroup
+        # Real planets first, then comet planets
+        planets = [
+            _planet(pid, owner=0, ships=10.0, x=10.0 + pid, y=50.0)
+            for pid in real_planet_ids
+        ]
+        for pid in planet_ids:
+            planets.append(_planet(pid, owner=-1, ships=0.0, x=20.0, y=20.0, is_comet=True))
+        state = _state(planets, step=10)
+        state.comet_groups = [
+            SimCometGroup(planet_ids=list(planet_ids), paths=paths, path_index=path_index),
+        ]
+        return state
+
+    def test_no_comets_no_change(self):
+        sim = Simulator()
+        state = _state([_planet(0, owner=0, ships=10.0)])
+        sim._phase_0_comet_expiration(state)
+        assert state.comet_groups == []
+        assert len(state.planets) == 1
+
+    def test_unexpired_comet_kept(self):
+        """Comet with path_index < len(path) is not removed."""
+        sim = Simulator()
+        path = [(20.0, 20.0), (21.0, 21.0), (22.0, 22.0)]
+        state = self._make_state_with_comet_group(
+            planet_ids=[100],
+            paths=[path],
+            path_index=1,  # 1 < 3
+        )
+        sim._phase_0_comet_expiration(state)
+        assert state.planet_by_id(100) is not None
+        assert len(state.comet_groups) == 1
+
+    def test_expired_comet_removed_from_planets(self):
+        """Comet with path_index >= len(path) is dropped from planets."""
+        sim = Simulator()
+        path = [(20.0, 20.0), (21.0, 21.0)]
+        state = self._make_state_with_comet_group(
+            planet_ids=[100],
+            paths=[path],
+            path_index=2,  # 2 >= len(path)=2
+            real_planet_ids=(0,),
+        )
+        # initial_planets and comet_planet_ids tracking must also clear
+        # _state default sets initial_planets = list(planets), so already populated
+        sim._phase_0_comet_expiration(state)
+        assert state.planet_by_id(100) is None
+        assert state.planet_by_id(0) is not None  # real planet untouched
+
+    def test_expired_comet_removed_from_initial_planets(self):
+        sim = Simulator()
+        path = [(20.0, 20.0)]
+        state = self._make_state_with_comet_group(
+            planet_ids=[100],
+            paths=[path],
+            path_index=1,  # expired (1 >= 1)
+            real_planet_ids=(0,),
+        )
+        sim._phase_0_comet_expiration(state)
+        assert all(ip.id != 100 for ip in state.initial_planets)
+
+    def test_empty_group_removed(self):
+        """Group whose planet_ids becomes empty after expiration is dropped."""
+        sim = Simulator()
+        path = [(20.0, 20.0)]
+        state = self._make_state_with_comet_group(
+            planet_ids=[100],
+            paths=[path],
+            path_index=1,
+        )
+        sim._phase_0_comet_expiration(state)
+        assert state.comet_groups == []
+
+    def test_partial_group_keeps_remaining_planets(self):
+        """Group with multiple comets — only expired ones are removed."""
+        sim = Simulator()
+        from orbit_wars.sim.state import SimCometGroup
+        # Comet 100 has 1-step path (expired at path_index=1).
+        # Comet 101 has 3-step path (still active at path_index=1).
+        planets = [
+            _planet(100, owner=-1, ships=0.0, x=20.0, y=20.0, is_comet=True),
+            _planet(101, owner=-1, ships=0.0, x=21.0, y=21.0, is_comet=True),
+        ]
+        state = _state(planets, step=10)
+        state.comet_groups = [
+            SimCometGroup(
+                planet_ids=[100, 101],
+                paths=[[(20.0, 20.0)], [(21.0, 21.0), (22.0, 22.0), (23.0, 23.0)]],
+                path_index=1,  # 1 >= 1 expires comet 100; 1 < 3 keeps comet 101
+            ),
+        ]
+        sim._phase_0_comet_expiration(state)
+        assert state.planet_by_id(100) is None
+        assert state.planet_by_id(101) is not None
+        assert len(state.comet_groups) == 1
+        assert state.comet_groups[0].planet_ids == [101]
+
+
 class TestPhase5RotationAndSweep:
     """Real Phase 5 (Day 7-9): planet rotation + sweep_fleets per env L553-627."""
 
