@@ -271,6 +271,51 @@ class Simulator:
                     )
                     swept_fleet_ids.add(fleet.id)
 
+        # Comet movement along pre-computed paths — env L592-611.
+        # Comets share the swept_fleet_ids set with planet rotation, so a
+        # fleet swept by a planet is not also swept by a comet.
+        expired_comet_pids: set[int] = set()
+        for group in state.comet_groups:
+            group.path_index += 1
+            idx = group.path_index
+            for i, pid in enumerate(group.planet_ids):
+                planet = state.planet_by_id(pid)
+                if planet is None:
+                    continue
+                p_path = group.paths[i]
+                if idx >= len(p_path):
+                    expired_comet_pids.add(pid)
+                    continue
+                old_pos = (planet.x, planet.y)
+                planet.x = p_path[idx][0]
+                planet.y = p_path[idx][1]
+                # Skip sweep on first placement (off-board placeholder x=-99)
+                if old_pos[0] < 0:
+                    continue
+                new_pos = (planet.x, planet.y)
+                if old_pos == new_pos:
+                    continue
+                for fleet in state.fleets:
+                    if fleet.id in swept_fleet_ids:
+                        continue
+                    if point_to_segment_distance((fleet.x, fleet.y), old_pos, new_pos) < planet.radius:
+                        combat_lists.setdefault(planet.id, []).append(
+                            ArrivalEvent(eta=1, owner=fleet.owner, ships=fleet.ships)
+                        )
+                        swept_fleet_ids.add(fleet.id)
+
+        # Remove expired comets — same pattern as Phase 0 (env L605-611).
+        if expired_comet_pids:
+            state.planets = [p for p in state.planets if p.id not in expired_comet_pids]
+            state.initial_planets = [
+                p for p in state.initial_planets if p.id not in expired_comet_pids
+            ]
+            for group in state.comet_groups:
+                group.planet_ids = [
+                    pid for pid in group.planet_ids if pid not in expired_comet_pids
+                ]
+            state.comet_groups = [g for g in state.comet_groups if g.planet_ids]
+
         if swept_fleet_ids:
             state.fleets = [f for f in state.fleets if f.id not in swept_fleet_ids]
 

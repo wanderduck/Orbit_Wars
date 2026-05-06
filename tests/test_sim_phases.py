@@ -571,6 +571,94 @@ class TestPhase5RotationAndSweep:
         assert combat_lists[0] == []
         assert len(state.fleets) == 1
 
+    def test_comet_advances_along_path(self):
+        """Phase 5 increments path_index and moves comet to path[idx]."""
+        from orbit_wars.sim.state import SimCometGroup
+        sim = Simulator()
+        path = [(20.0, 20.0), (25.0, 25.0), (30.0, 30.0)]
+        state = _state(
+            [_planet(100, owner=-1, ships=0.0, x=20.0, y=20.0, is_comet=True, radius=1.0)],
+            step=10,
+        )
+        state.comet_groups = [
+            SimCometGroup(planet_ids=[100], paths=[path], path_index=0),
+        ]
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_5_rotate_planets(state, combat_lists)
+        # path_index incremented 0 → 1; comet moved to path[1]=(25,25)
+        assert state.comet_groups[0].path_index == 1
+        assert state.planet_by_id(100).x == 25.0
+        assert state.planet_by_id(100).y == 25.0
+
+    def test_comet_at_path_end_expires(self):
+        """When path_index +1 reaches len(path), comet is removed."""
+        from orbit_wars.sim.state import SimCometGroup
+        sim = Simulator()
+        path = [(20.0, 20.0), (25.0, 25.0)]
+        state = _state(
+            [_planet(100, owner=-1, ships=0.0, x=25.0, y=25.0, is_comet=True, radius=1.0)],
+            step=10,
+        )
+        state.comet_groups = [
+            SimCometGroup(planet_ids=[100], paths=[path], path_index=1),
+        ]
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_5_rotate_planets(state, combat_lists)
+        # path_index 1+1=2 >= len(path)=2 → expire
+        assert state.planet_by_id(100) is None
+        assert state.comet_groups == []  # group emptied → removed
+
+    def test_comet_sweeps_fleet_on_move(self):
+        """A comet moving from A to B that passes through a fleet sweeps it."""
+        from orbit_wars.sim.state import SimCometGroup
+        sim = Simulator()
+        # Comet at (20, 20) moving to (30, 20). Fleet at (25, 20) — on segment.
+        path = [(20.0, 20.0), (30.0, 20.0)]
+        state = _state(
+            [_planet(100, owner=-1, ships=0.0, x=20.0, y=20.0, is_comet=True, radius=2.0)],
+            fleets=[SimFleet(
+                id=42, owner=1, from_planet_id=0, target_planet_id=0,
+                x=25.0, y=20.0, angle=0.0, ships=5, spawned_at_step=0,
+            )],
+            step=10,
+        )
+        state.comet_groups = [
+            SimCometGroup(planet_ids=[100], paths=[path], path_index=0),
+        ]
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_5_rotate_planets(state, combat_lists)
+        # Comet swept fleet → in combat_lists[100], removed from state.fleets
+        assert len(combat_lists[100]) == 1
+        assert combat_lists[100][0].owner == 1
+        assert combat_lists[100][0].ships == 5
+        assert state.fleets == []
+
+    def test_comet_first_placement_no_sweep(self):
+        """When old_pos[0] < 0 (off-board placeholder from spawn), no sweep."""
+        from orbit_wars.sim.state import SimCometGroup
+        sim = Simulator()
+        # Comet at (-99, -99) — just spawned by env's Phase 1 (which we skip).
+        # First Phase 5 advancement places it at path[0]=(20,20). NO sweep.
+        path = [(20.0, 20.0), (25.0, 25.0)]
+        state = _state(
+            [_planet(100, owner=-1, ships=0.0, x=-99.0, y=-99.0, is_comet=True, radius=2.0)],
+            fleets=[SimFleet(
+                # Fleet between (-99,-99) and (20,20) — would be swept if sweep ran
+                id=0, owner=1, from_planet_id=0, target_planet_id=0,
+                x=0.0, y=0.0, angle=0.0, ships=5, spawned_at_step=0,
+            )],
+            step=10,
+        )
+        state.comet_groups = [
+            SimCometGroup(planet_ids=[100], paths=[path], path_index=-1),
+        ]
+        combat_lists: dict[int, list] = {p.id: [] for p in state.planets}
+        sim._phase_5_rotate_planets(state, combat_lists)
+        # Comet now at path[0]; fleet NOT swept (first-placement skip)
+        assert state.planet_by_id(100).x == 20.0
+        assert combat_lists[100] == []
+        assert len(state.fleets) == 1
+
     def test_fleet_swept_by_one_planet_not_double_swept(self):
         """A fleet caught by planet A's sweep is NOT also caught by planet B's sweep."""
         sim = Simulator()
