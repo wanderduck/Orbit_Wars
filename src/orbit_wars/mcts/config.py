@@ -92,3 +92,20 @@ class MCTSConfig:
     # tokens). Default OFF per Risk 1 mitigation: enable selectively if M5 perf
     # data shows long-tail matters in practice.
     long_tail_enabled: bool = False
+
+    # Where to place the COMMIT_TURN sentinel in ranked_tokens. Per design
+    # §5.2 the recommendation was "first" (highest prior — MCTS defaults to
+    # not launching unless a token looks better). EMPIRICAL FINDING (commit
+    # 1c6d359 picks-diag): COMMIT-first causes MCTS to pick COMMIT 97-99% of
+    # turns even with FPU=0.7, depth=5 — same FPU starvation as M3 but stuck
+    # on do-nothing instead of heuristic. This is the opposite-extreme failure
+    # mode design open Q3 anticipated.
+    #
+    # "last": COMMIT goes at the END of ranked_tokens (lowest prior position).
+    # PW considers heuristic-derived tokens FIRST; COMMIT is only considered
+    # when PW expansion reaches it. Use when launch-heavy play is preferred
+    # by default and HOLD must be earned by evidence.
+    #
+    # "first": COMMIT at index 0. The design v2 default. Best when the value
+    # proxy correctly distinguishes "good launches" from "bad launches".
+    commit_position: str = "last"

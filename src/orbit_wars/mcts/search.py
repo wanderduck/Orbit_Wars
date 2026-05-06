@@ -304,9 +304,21 @@ def _search_legacy(
 # ===========================================================================
 
 
-# Conventional index for the COMMIT_TURN sentinel within ranked_tokens lists.
-# generate_ranked_tokens always places COMMIT at index 0 (per design §5.2).
+# Conventional value used in unit tests where token lists are constructed
+# manually with COMMIT at index 0. Production code uses _find_commit_idx
+# (token list may have COMMIT at any position depending on cfg.commit_position).
 _COMMIT_IDX = 0
+
+
+def _find_commit_idx(tokens: list[LaunchToken]) -> int:
+    """Return the index of the COMMIT sentinel in ``tokens``. Generator
+    convention: COMMIT is at index 0 (cfg.commit_position="first") or at
+    len(tokens)-1 (cfg.commit_position="last"). Returns 0 if no COMMIT
+    found, which would be a generator bug — defensive."""
+    for idx, t in enumerate(tokens):
+        if t.is_commit():
+            return idx
+    return 0
 
 
 def _filter_valid_token_indices(
@@ -324,6 +336,11 @@ def _filter_valid_token_indices(
       - Its source planet has enough ships left after subtracting the ship
         consumption of all prior picks from the same source.
 
+    The returned list PRESERVES the ranking order from ``tokens`` (so PW
+    can slice the top-k correctly). COMMIT appears in its ranked-list
+    position — design §5.2 + cfg.commit_position determines whether that's
+    the front (index 0) or the back (index len-1).
+
     The bucket-resolved ship count for a token uses the CURRENT post-prior
     pool, mirroring the serializer's logic exactly.
     """
@@ -332,7 +349,7 @@ def _filter_valid_token_indices(
         p.id: int(p.ships) for p in state.planets if p.owner == player_id
     }
     for prior_idx in prior_picks:
-        if prior_idx == _COMMIT_IDX or prior_idx >= len(tokens):
+        if prior_idx >= len(tokens):
             continue
         prior_token = tokens[prior_idx]
         if prior_token.is_commit():
@@ -346,12 +363,13 @@ def _filter_valid_token_indices(
             ships = avail
         ship_pool[prior_token.src_planet_id] = max(0, avail - ships)
 
-    valid_indices: list[int] = [_COMMIT_IDX]  # COMMIT always valid
+    # Walk tokens in ranking order, keeping COMMIT (always valid) and
+    # launch tokens whose source can still afford the bucket-resolved ships.
+    valid_indices: list[int] = []
     for idx, t in enumerate(tokens):
-        if idx == _COMMIT_IDX:
-            continue  # already added
         if t.is_commit():
-            continue  # defensive — should only be at index 0
+            valid_indices.append(idx)  # COMMIT always valid
+            continue
         avail = ship_pool.get(t.src_planet_id, 0)
         if avail <= 0:
             continue
@@ -368,6 +386,7 @@ def _ucb_select_token(
     player_idx: int,
     considered_indices: list[int],
     cfg: MCTSConfig,
+    fallback_idx: int = 0,
 ) -> int:
     """Pick the token_idx with the highest UCB1 + FPU score among
     ``considered_indices`` for ``player_idx`` at ``sub``.
@@ -375,9 +394,12 @@ def _ucb_select_token(
     UCB exploration is computed against ``sub.visits`` (not the parent
     MCTSNode's visits) — sub-nodes have separate visit counts and the
     exploration term should reflect THIS sub-node's local statistics.
+
+    ``fallback_idx`` is returned only if ``considered_indices`` is empty
+    (defensive — filter_valid should always return at least COMMIT).
     """
     if not considered_indices:
-        return _COMMIT_IDX  # nothing to pick — commit
+        return fallback_idx
     if len(considered_indices) == 1:
         return considered_indices[0]
 
@@ -431,30 +453,38 @@ def _smmcts_token_iteration(
         if max_picks >= cfg.max_launches_per_turn:
             break
 
-        # Build joint pick — one token_idx per alive player
+        # Build joint pick — one token_idx per alive player. For already-
+        # committed players, the pick is just their commit_idx (no-op for
+        # advancing state, but keeps the joint-pick tuple aligned).
         joint_pick: list[int] = []
         for p_idx, p in enumerate(alive_players):
-            if sub.committed_per_player[p_idx]:
-                joint_pick.append(_COMMIT_IDX)
-                continue
             tokens = node.ranked_tokens[p]
+            commit_idx = _find_commit_idx(tokens)
+            if sub.committed_per_player[p_idx]:
+                joint_pick.append(commit_idx)
+                continue
             valid = _filter_valid_token_indices(
                 tokens, sub.picks_per_player[p_idx], node.state, p, cfg
             )
             # Progressive Widening: limit to top-k by ranking position
             k = _pw_action_count(sub.visits, cfg)
             considered = valid[:min(k, len(valid))]
-            chosen = _ucb_select_token(sub, p_idx, considered, cfg)
+            chosen = _ucb_select_token(
+                sub, p_idx, considered, cfg, fallback_idx=commit_idx,
+            )
             joint_pick.append(chosen)
         joint_pick_t = tuple(joint_pick)
 
         path.append((sub, joint_pick_t))
 
-        # Compute next sub-node key
+        # Compute next sub-node key. Picking COMMIT marks the player as
+        # committed; picking a launch token appends to picks_per_player.
         new_picks = []
         new_committed = []
         for i, idx in enumerate(joint_pick):
-            if idx == _COMMIT_IDX:
+            tokens_i = node.ranked_tokens[alive_players[i]]
+            picked_token = tokens_i[idx] if idx < len(tokens_i) else None
+            if picked_token is None or picked_token.is_commit():
                 new_picks.append(sub.picks_per_player[i])
                 new_committed.append(True)
             else:

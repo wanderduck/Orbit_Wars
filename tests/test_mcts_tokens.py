@@ -93,7 +93,7 @@ def _patches(decisions_to_return: list[LaunchDecision]):
 
 class TestEmptyHeuristicOutput:
     def test_no_decisions_returns_only_commit(self) -> None:
-        cfg = MCTSConfig(use_token_variants=True)
+        cfg = MCTSConfig(use_token_variants=True, commit_position="first")
         state = FakeState(planets=[FakePlanet(id=0, owner=0, ships=10)])
         with ExitStack() as stack:
             for p in _patches([]):
@@ -105,7 +105,7 @@ class TestEmptyHeuristicOutput:
 class TestCommitAtIndexZero:
     def test_commit_always_first(self) -> None:
         """Per design §5.2 — COMMIT at index 0 is critical for PW behavior."""
-        cfg = MCTSConfig(use_token_variants=True)
+        cfg = MCTSConfig(use_token_variants=True, commit_position="first")
         state = FakeState(planets=[FakePlanet(id=0, owner=0, ships=100)])
         decisions = [_make_decision(src_id=0, target_id=1, ships=50)]
         with ExitStack() as stack:
@@ -167,7 +167,8 @@ class TestBucketSelectionByDistance:
         (0.25, 0.5, 0.75, 1.0) and ships=50/100=0.5, the order should be
         bucket 1 (0.5, dist 0) → bucket 0 (0.25, dist 0.25) or 2 (0.75, dist 0.25)
         → bucket 3 (1.0, dist 0.5)."""
-        cfg = MCTSConfig(use_token_variants=True, tokens_per_decision=4)
+        cfg = MCTSConfig(use_token_variants=True, tokens_per_decision=4,
+                         commit_position="first")
         state = FakeState(planets=[FakePlanet(id=0, owner=0, ships=100)])
         decisions = [_make_decision(src_id=0, target_id=1, ships=50)]
         with ExitStack() as stack:
@@ -187,7 +188,8 @@ class TestBucketSelectionByDistance:
     def test_chosen_fraction_at_extreme(self) -> None:
         """ships=src.ships → fraction=1.0; bucket 3 (1.0) is chosen, bucket 0
         (0.25, distance 0.75) is last."""
-        cfg = MCTSConfig(use_token_variants=True, tokens_per_decision=4)
+        cfg = MCTSConfig(use_token_variants=True, tokens_per_decision=4,
+                         commit_position="first")
         state = FakeState(planets=[FakePlanet(id=0, owner=0, ships=100)])
         decisions = [_make_decision(0, 1, ships=100)]
         with ExitStack() as stack:
@@ -232,7 +234,8 @@ class TestSourceFiltering:
 class TestRankingPreservesDecisionOrder:
     def test_first_decision_tokens_come_before_second(self) -> None:
         """Decisions arrive ranked by heuristic; tokens preserve that order."""
-        cfg = MCTSConfig(use_token_variants=True, tokens_per_decision=1)
+        cfg = MCTSConfig(use_token_variants=True, tokens_per_decision=1,
+                         commit_position="first")
         state = FakeState(planets=[
             FakePlanet(id=0, owner=0, ships=100),
             FakePlanet(id=5, owner=0, ships=100),
@@ -248,6 +251,47 @@ class TestRankingPreservesDecisionOrder:
         # Skip COMMIT — token from decision[0] (src=0) first, then from decision[1] (src=5)
         assert tokens[1].src_planet_id == 0
         assert tokens[2].src_planet_id == 5
+
+
+class TestCommitPositionLast:
+    """When cfg.commit_position='last' (default), COMMIT is at the END of
+    the ranked_tokens list, not at index 0. This is the empirically-chosen
+    placement that prevents COMMIT-first FPU starvation (mcts_picks_tokens).
+    """
+
+    def test_default_is_last(self) -> None:
+        cfg = MCTSConfig(use_token_variants=True)
+        assert cfg.commit_position == "last"
+
+    def test_commit_at_end_when_decisions_exist(self) -> None:
+        cfg = MCTSConfig(use_token_variants=True, commit_position="last",
+                         tokens_per_decision=1)
+        state = FakeState(planets=[FakePlanet(id=0, owner=0, ships=100)])
+        decisions = [
+            _make_decision(src_id=0, target_id=1, ships=50),
+            _make_decision(src_id=0, target_id=2, ships=25),
+        ]
+        with ExitStack() as stack:
+            for p in _patches(decisions):
+                stack.enter_context(p)
+            tokens = generate_ranked_tokens(state, 0, cfg)
+        # 2 heuristic tokens + 1 COMMIT at end = 3 tokens
+        assert len(tokens) == 3
+        assert tokens[-1].is_commit()
+        # The first two are heuristic tokens (preserve decision order)
+        assert not tokens[0].is_commit()
+        assert not tokens[1].is_commit()
+
+    def test_commit_only_when_no_decisions(self) -> None:
+        """No heuristic launches — only COMMIT meaningful, position
+        irrelevant."""
+        cfg = MCTSConfig(use_token_variants=True, commit_position="last")
+        state = FakeState(planets=[FakePlanet(id=0, owner=0, ships=100)])
+        with ExitStack() as stack:
+            for p in _patches([]):
+                stack.enter_context(p)
+            tokens = generate_ranked_tokens(state, 0, cfg)
+        assert tokens == [LaunchToken.COMMIT]
 
 
 class TestLongTailDisabledByDefault:

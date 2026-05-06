@@ -66,8 +66,6 @@ def generate_ranked_tokens(
     can be appended via :func:`extend_with_long_tail` when PW asks for k >
     len(prior). This is OFF by default; enable via `cfg.long_tail_enabled`.
     """
-    tokens: list[LaunchToken] = [LaunchToken.COMMIT]
-
     # Run the full heuristic from `player_id`'s perspective to get the prior.
     obs_dict = _simstate_to_env_dict(state)
     obs_dict["player"] = player_id
@@ -76,11 +74,12 @@ def generate_ranked_tokens(
 
     if not decisions:
         # Heuristic chose to launch nothing — only COMMIT is meaningful.
-        return tokens
+        return [LaunchToken.COMMIT]
 
     n_buckets = len(cfg.ship_fraction_buckets)
     tokens_per_dec = max(1, min(cfg.tokens_per_decision, n_buckets))
 
+    heuristic_tokens: list[LaunchToken] = []
     for decision in decisions:
         src = state.planet_by_id(decision.src_id)
         if src is None or src.ships <= 0:
@@ -96,7 +95,7 @@ def generate_ranked_tokens(
             key=lambda i: abs(cfg.ship_fraction_buckets[i] - chosen_fraction),
         )
         for bucket_idx in bucket_order[:tokens_per_dec]:
-            tokens.append(
+            heuristic_tokens.append(
                 LaunchToken(
                     src_planet_id=decision.src_id,
                     target_planet_id=decision.target_id,
@@ -104,7 +103,15 @@ def generate_ranked_tokens(
                 )
             )
 
-    return tokens
+    # COMMIT placement per cfg.commit_position.
+    # See config.py for the rationale (default "last" — empirical finding
+    # that COMMIT-first causes do-nothing dominance).
+    if cfg.commit_position == "first":
+        return [LaunchToken.COMMIT] + heuristic_tokens
+    # Default: COMMIT at the end (lowest prior position). PW considers
+    # heuristic tokens first; COMMIT only enters consideration once the PW
+    # expansion reaches its index.
+    return heuristic_tokens + [LaunchToken.COMMIT]
 
 
 def extend_with_long_tail(
