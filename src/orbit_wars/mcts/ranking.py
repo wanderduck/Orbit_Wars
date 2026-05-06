@@ -136,23 +136,59 @@ def get_heuristic_action_for(state: SimState, player_id: int) -> ActionList:
 def ranked_actions_with_heuristic(
     state: SimState, player_id: int, k: int = 8
 ) -> list[ActionList]:
-    """Like `ranked_actions_for` but variant 0 is the FULL HEURISTIC's action.
+    """Generate root variants centered on the heuristic action with drop-one
+    perturbations of the heuristic's own launch list.
 
-    This guarantees MCTS's worst-case pick at the root is equivalent to
-    the heuristic's pick. If MCTS picks variant 0, we behave exactly like
-    the heuristic. If MCTS picks variant 1+, it has statistical evidence
-    that the alternative is better.
+    v0 = full heuristic action (the heuristic's exact decision)
+    v1 = HOLD (empty action list — keep ships, do nothing this turn)
+    v2..vk = drop-one perturbations — for each launch in the heuristic's
+             list, generate a variant that omits just that one launch.
 
-    Use ONLY at the root (cost ~10-20ms per player); inner nodes should use
-    `ranked_actions_for` (lightweight only).
+    Drop ordering: we drop launches[-1] first (the heuristic's lowest-
+    priority launch — most likely to be a borderline call) and work
+    backwards through the list. Rationale: a borderline launch is more
+    likely to be net-negative than the heuristic's highest-priority pick.
+    If MCTS finds "drop launches[i]" beats "include launches[i]", that's
+    direct evidence launches[i] was a regret.
+
+    This replaces the prior "lightweight nearest-target drop-one" variants
+    that yielded NO lift in the M2/M3 picks-diag (variant 0 was picked
+    99-100% of turns under FPU=0.5 because the lightweight variants were
+    strictly worse than the heuristic). Heuristic-derived perturbations
+    are at least *plausibly* better than the heuristic — they share its
+    target selection and ship-count math.
+
+    Use ONLY at the root (cost ~10-20ms per player — one heuristic call);
+    inner nodes use `ranked_actions_for` (lightweight only).
     """
-    heur_action = get_heuristic_action_for(state, player_id)
-    light_variants = ranked_actions_for(state, player_id, k=k)
+    # Lazy imports to keep this module cheap when ranking is used standalone.
+    from orbit_wars.heuristic.strategy import decide_with_decisions
+    from orbit_wars.sim.validator import _simstate_to_env_dict
 
-    # Variant 0 = heuristic. Variants 1..K-1 = lightweight (skipping its
-    # variant 0 which would otherwise duplicate heuristic when both pick
-    # similar moves; instead include hold + drop-one variants).
-    if len(light_variants) <= 1:
-        # Light gave only "hold" → use heuristic + hold
-        return [heur_action, []] if heur_action else [[]]
-    return [heur_action] + light_variants[1:k]
+    obs_dict = _simstate_to_env_dict(state)
+    obs_dict["player"] = player_id
+    obs_dict["remainingOverageTime"] = 60.0  # arbitrary; heuristic doesn't use
+
+    launches, _decisions = decide_with_decisions(obs_dict, None)
+
+    if not launches:
+        # Heuristic chose to hold — only HOLD is meaningful.
+        return [[]]
+
+    variants: list[ActionList] = [launches]  # v0 = full heuristic
+    variants.append([])  # v1 = HOLD (emergency / hold-and-build option)
+
+    # v2..vk: drop-one perturbations. With one launch, drop-one == HOLD,
+    # already covered by v1; skip in that case.
+    if len(launches) == 1:
+        return variants[:k]
+
+    n_drop = min(k - len(variants), len(launches))
+    for i in range(n_drop):
+        # Drop launches[-1-i] — start with heuristic's lowest-priority
+        # launch and work toward the highest-priority. Borderline launches
+        # are most likely to be regrets.
+        drop_idx = len(launches) - 1 - i
+        variants.append([m for j, m in enumerate(launches) if j != drop_idx])
+
+    return variants[:k]

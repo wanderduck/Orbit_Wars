@@ -158,11 +158,16 @@ class TestMCTSEnabledFallback:
             assert isinstance(move, list)
             assert len(move) == 3  # [from_id, angle, ships]
 
-    def test_enabled_true_no_fallback_raises(self) -> None:
-        """When fallback_to_heuristic=False, M1 should raise NotImplementedError
-        to make it loud during development."""
-        # Use a minimal mock obs since we expect to never reach the agent code.
-        # Just need a dict-shape obs.
+    def test_enabled_true_returns_action_list(self) -> None:
+        """M2/M3 contract: enabled=True actually runs SM-MCTS and returns a
+        list-of-lists action (possibly empty). This test was originally written
+        for M1 (which raised NotImplementedError to mark itself as a stub) but
+        was made obsolete by the M2 implementation in commit e3dc4e8.
+
+        With fallback_to_heuristic=False, the MCTS code path is exercised
+        directly — no exceptions silently swallowed. Empty mock state means
+        no launches are possible, so an empty list is the expected return.
+        """
         class _MockObs:
             planets = []
             fleets = []
@@ -174,6 +179,12 @@ class TestMCTSEnabledFallback:
             step = 5
             player = 0
             remainingOverageTime = 60.0
-        with pytest.raises(NotImplementedError):
-            mcts_agent(_MockObs(), MCTSConfig(enabled=True),
-                       fallback_to_heuristic=False)
+        out = mcts_agent(
+            _MockObs(),
+            MCTSConfig(enabled=True, turn_budget_ms=50.0),
+            fallback_to_heuristic=False,
+        )
+        assert isinstance(out, list)
+        for move in out:
+            assert isinstance(move, list)
+            assert len(move) == 3
