@@ -30,6 +30,7 @@ from .geometry import (
     dist,
     fleet_speed,
     safe_angle_and_distance,
+    swept_pair_hit,
 )
 from .rotation import predict_planet_position
 from .state import Fleet, ObservationView, Planet
@@ -239,24 +240,34 @@ def path_collision_predicted(
     comet_path_indices: dict[int, int] | None = None,
     skip_own: bool = True,
 ) -> Planet | None:
-    """Walk the planned fleet trajectory turn-by-turn, predicting other planets' positions
-    at each turn. Return the first planet (other than src and target) that would intercept
-    the fleet, or None if the path is clear.
+    """Walk the planned fleet trajectory turn-by-turn using continuous swept-pair
+    collision detection. Return the first planet (other than src and target) that
+    would intercept the fleet, or None if the path is clear.
 
-    This catches the "moving planet sweeps into fleet" case from the env's phase 6
-    (E1/E3): "Any fleet caught by a moving planet/comet is swept into combat with it."
+    Per env master (commit 6458c31): the env now uses `swept_pair_hit` to check
+    if a fleet's per-tick segment and a planet's per-tick segment come within
+    `planet.radius` of each other at any time t in [0, 1]. This catches both:
+      - Fleet trajectory crossing a planet's path (old "fleet → static planet" check)
+      - Planet rotating into a fleet's position (old "moving planet sweeps fleet")
+    AND correctly REJECTS false positives where a planet rotates AWAY from the
+    fleet during the same tick (the old point-distance check would falsely flag
+    those as collisions).
 
-    If ``skip_own`` is True, ignore collisions with the player's own planets — the fleet
-    ships are added to that planet's garrison (no loss), which is acceptable. Set False
-    to be conservative.
+    If ``skip_own`` is True, ignore collisions with the player's own planets — the
+    fleet ships are added to that planet's garrison (no loss), which is acceptable.
+    Set False to be conservative.
 
-    Position prediction:
-    - Orbiting planets: rotate from CURRENT position by ``t`` rotations (NOT from
-      ``initial_planets`` — that's the off-by-N bug fixed for ``predict_target_position``
-      in v1.3, and it applies here too).
-    - Comets: index into ``comet_paths[planet_id]`` at the appropriate turn (linear
-      trajectories, not orbital). Pass ``comet_paths`` and ``comet_path_indices`` from
-      the WorldModel to enable comet-aware clearance.
+    We use `planet.radius + LAUNCH_CLEARANCE` as the collision threshold (a 0.1
+    safety margin over env's strict `planet.radius`) — being slightly conservative
+    at the agent's planning layer is preferable to losing fleets the env destroys.
+
+    Position prediction per turn t:
+    - Fleet: linear from old=(sx + dx*speed*(t-1), sy + dy*speed*(t-1)) to
+      new=(sx + dx*speed*t, sy + dy*speed*t)
+    - Orbiting planet: rotate from CURRENT position by (t-1) and t rotations (NOT
+      from initial_planets — off-by-N bug otherwise)
+    - Comet: index into comet_paths[planet_id] at idx_now+(t-1) and idx_now+t,
+      capped at len(path)-1 (linear trajectories along discrete waypoints)
     """
     speed = fleet_speed(ships)
     sx = src.x + math.cos(angle) * (src.radius + LAUNCH_CLEARANCE)
@@ -265,25 +276,28 @@ def path_collision_predicted(
     dy = math.sin(angle)
 
     for t in range(1, eta + 1):
-        fx = sx + dx * speed * t
-        fy = sy + dy * speed * t
+        # Fleet positions at the START and END of turn t (one tick of motion).
+        fleet_old = (sx + dx * speed * (t - 1), sy + dy * speed * (t - 1))
+        fleet_new = (sx + dx * speed * t, sy + dy * speed * t)
 
         for p in view.planets:
             if p.id == src.id or p.id == target.id:
                 continue
             if skip_own and p.owner == view.player:
                 continue
-            # Predict p's position at turn t
+            # Predict p's start-of-turn and end-of-turn positions for this tick.
             if comet_paths is not None and p.id in comet_paths:
                 path = comet_paths[p.id]
                 idx_now = (comet_path_indices or {}).get(p.id, 0)
-                idx_at_t = min(idx_now + t, len(path) - 1)
-                px, py = path[idx_at_t]
+                idx_old = min(idx_now + (t - 1), len(path) - 1)
+                idx_new = min(idx_now + t, len(path) - 1)
+                planet_old = path[idx_old]
+                planet_new = path[idx_new]
             else:
-                # Rotate from CURRENT position (not initial — off-by-N bug otherwise)
-                px, py = predict_planet_position(p, view.angular_velocity, t)
-            d = math.hypot(fx - px, fy - py)
-            if d < p.radius + LAUNCH_CLEARANCE:
+                planet_old = predict_planet_position(p, view.angular_velocity, t - 1)
+                planet_new = predict_planet_position(p, view.angular_velocity, t)
+            if swept_pair_hit(fleet_old, fleet_new, planet_old, planet_new,
+                              p.radius + LAUNCH_CLEARANCE):
                 return p
     return None
 
