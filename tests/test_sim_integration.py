@@ -181,3 +181,77 @@ def test_day_9_11_gate_match_rate_at_least_99_percent():
         f"Day 9-11 gate FAILED: match_rate={report.match_rate:.3f} < 0.99. "
         f"Top mismatch categories: {sorted(report.mismatch_categories.items(), key=lambda kv: -kv[1])[:5]}"
     )
+
+
+# --- Replay-based gate (real top-agent ladder games) -----------------------
+
+from pathlib import Path
+
+REPLAY_DIR = Path(__file__).parent.parent / "replay"
+
+
+@pytest.mark.slow
+def test_replay_based_gate_matches_real_ladder_games():
+    """Validate simulator against real top-agent replays from Kaggle ladder.
+
+    Skips if replay/ is empty (replays are gitignored). Run the downloader
+    first: `uv run python -m tools.download_replays --count 5`.
+
+    The replay-based gate is the strongest validation we can do — these
+    are real games played by top humans against each other on the Kaggle
+    leaderboard, often 4P FFA, with rich fleet/combat/comet activity.
+    """
+    import json
+    from orbit_wars.sim.simulator import Simulator
+    from orbit_wars.sim.validator import (
+        ForwardModelValidator,
+        ValidationTriple,
+        extract_from_replay,
+        filter_day_9_11_scenarios,
+    )
+
+    if not REPLAY_DIR.is_dir():
+        pytest.skip(f"replay directory missing at {REPLAY_DIR}")
+
+    replay_files = sorted(REPLAY_DIR.glob("*.json"))
+    if not replay_files:
+        pytest.skip(f"no replay JSONs in {REPLAY_DIR} (run tools.download_replays first)")
+
+    # Build triples from all replays
+    triples: list[ValidationTriple] = []
+    for replay_path in replay_files:
+        with replay_path.open() as f:
+            replay = json.load(f)
+        n_steps = len(replay["steps"])
+        for step_idx in range(n_steps - 1):
+            try:
+                state_t, actions = extract_from_replay(replay, step_idx)
+                state_t1, _ = extract_from_replay(replay, step_idx + 1)
+            except (KeyError, IndexError, TypeError):
+                continue
+            triples.append(ValidationTriple(
+                state_t=state_t,
+                actions_t=actions,
+                expected_state_t1=state_t1,
+                source_seed=int(replay_path.stem),  # episode ID as proxy
+                source_step=step_idx,
+            ))
+
+    print(f"\nReplay corpus: {len(replay_files)} files, {len(triples)} raw triples")
+
+    filtered = filter_day_9_11_scenarios(triples)
+    print(f"After Day 9-11 filter: {len(filtered)} triples")
+    assert len(filtered) > 0, "no triples survived filter"
+
+    v = ForwardModelValidator(simulator=Simulator())
+    report = v.validate(filtered, gate_categories=GATE_CATEGORIES_DAY_9_11)
+    print(f"Replay gate: n_total={report.n_total}  n_match={report.n_match}  "
+          f"match_rate={report.match_rate:.3f}")
+    print(f"Mismatch categories: {report.mismatch_categories}")
+
+    # Note: 4P games will be filtered out by the Day 9-11 filter (which
+    # requires num_agents == 2). 4P validation is Day 14 / unfiltered work.
+    assert report.match_rate >= 0.99, (
+        f"Replay gate FAILED: match_rate={report.match_rate:.3f} < 0.99. "
+        f"Top mismatch categories: {sorted(report.mismatch_categories.items(), key=lambda kv: -kv[1])[:5]}"
+    )

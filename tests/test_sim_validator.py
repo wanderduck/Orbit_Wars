@@ -158,6 +158,50 @@ class TestForwardModelValidator:
         assert report.n_match == 0
         assert report.mismatch_categories.get("ownership-flip", 0) == 1
 
+    def test_extract_from_replay_basic_shape(self):
+        """extract_from_replay produces SimState with expected fields from a JSON dict."""
+        from orbit_wars.sim.validator import extract_from_replay
+
+        # Minimal replay dict mimicking Kaggle's schema
+        obs_template = {
+            "step": 5,
+            "planets": [[0, 0, 10.0, 20.0, 2.0, 100.0, 1]],
+            "fleets": [],
+            "comets": [],
+            "comet_planet_ids": [],
+            "initial_planets": [[0, 0, 10.0, 20.0, 2.0, 100.0, 1]],
+            "angular_velocity": 0.03,
+            "next_fleet_id": 0,
+            "player": 0,
+        }
+        replay = {
+            "steps": [
+                # Step indices 0-5 are filler; only step 5 (index 5) and 6 matter
+                *[
+                    [{"observation": {**obs_template, "step": s, "player": 0}, "action": []},
+                     {"observation": {**obs_template, "step": s, "player": 1}, "action": []}]
+                    for s in range(6)
+                ],
+                # Step 6 with an action submitted
+                [{"observation": {**obs_template, "step": 6, "player": 0},
+                  "action": [[0, 1.5, 5]]},
+                 {"observation": {**obs_template, "step": 6, "player": 1},
+                  "action": []}],
+            ]
+        }
+        # Extract at step 5; actions at step 6 are what was submitted at step 5
+        state_t, actions = extract_from_replay(replay, 5)
+        assert state_t.step == 5
+        assert len(state_t.planets) == 1
+        assert state_t.planets[0].id == 0
+        assert state_t.config.num_agents == 2
+        assert 0 in actions and 1 in actions
+        assert len(actions[0]) == 1
+        assert actions[0][0].from_planet_id == 0
+        assert actions[0][0].angle == 1.5
+        assert actions[0][0].ships == 5
+        assert actions[1] == []
+
     def test_validate_skips_categories_when_gate_filter_applied(self):
         from orbit_wars.sim.validator import (
             ForwardModelValidator,

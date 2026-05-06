@@ -22,6 +22,12 @@ _research_workspace/
 # runs they want to preserve, but default is to ignore)
 docs/research_documents/tuning_runs/
 
+# Downloaded Kaggle replay JSONs (large; regenerate via
+# `uv run python -m tools.download_replays`)
+replay/
+notebooks/replay/
+notebooks/episodes_*.json
+
 #agents
 .claude/agents
 

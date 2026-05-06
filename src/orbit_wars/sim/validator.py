@@ -43,6 +43,7 @@ __all__ = [
     "ForwardModelValidator",
     "ValidationReport",
     "ValidationTriple",
+    "extract_from_replay",
     "extract_state_and_actions",
     "filter_day_3_5_scenarios",
     "filter_day_5_7_scenarios",
@@ -309,6 +310,57 @@ def extract_state_and_actions(
         next_snap = env.steps[step_idx + 1]
         for p in range(n_agents):
             raw = next_snap[p].action
+            if raw:
+                actions[p] = [Action.from_env_format(move) for move in raw]
+            else:
+                actions[p] = []
+    else:
+        actions = {p: [] for p in range(n_agents)}
+
+    return sim_state, actions
+
+
+def extract_from_replay(
+    replay: dict, step_idx: int
+) -> tuple[SimState, dict[int, list[Action]]]:
+    """Extract typed SimState at `step_idx` plus actions submitted to PRODUCE step_idx+1.
+
+    Mirrors `extract_state_and_actions` but reads from a Kaggle replay
+    JSON (dict-shaped) instead of a live kaggle_environments env (Struct-
+    shaped). Replay schema:
+        replay["steps"][i]                    = list of agent dicts (one per player)
+        agent_dict["observation"]             = full env state at step i
+        agent_dict["action"]                  = action submitted for the
+                                                transition INTO step i
+
+    Same indexing convention as extract_state_and_actions: actions at
+    step_idx+1 are the ones submitted while the env was in state step_idx.
+
+    Use `tools.download_replays` to fetch replays into the local replay/
+    directory before calling this function.
+    """
+    steps = replay["steps"]
+    snap = steps[step_idx]
+    n_agents = len(snap)
+    obs = snap[0]["observation"]
+
+    state_dict = {
+        "step": obs["step"],
+        "planets": copy.deepcopy(list(obs["planets"])),
+        "fleets": copy.deepcopy(list(obs["fleets"])),
+        "comets": copy.deepcopy(list(obs["comets"])),
+        "comet_planet_ids": list(obs["comet_planet_ids"]),
+        "initial_planets": copy.deepcopy(list(obs["initial_planets"])),
+        "angular_velocity": obs["angular_velocity"],
+        "next_fleet_id": obs["next_fleet_id"],
+    }
+    sim_state = _env_dict_to_simstate(state_dict, num_agents=n_agents)
+
+    actions: dict[int, list[Action]] = {}
+    if step_idx + 1 < len(steps):
+        next_snap = steps[step_idx + 1]
+        for p in range(n_agents):
+            raw = next_snap[p].get("action")
             if raw:
                 actions[p] = [Action.from_env_format(move) for move in raw]
             else:
