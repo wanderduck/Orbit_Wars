@@ -34,6 +34,12 @@ def main() -> int:
     ap.add_argument("--budget-ms", type=float, default=200.0)
     ap.add_argument("--max-depth", type=int, default=3)
     ap.add_argument("--fixed-k", type=int, default=8)
+    ap.add_argument(
+        "--fpu-c", type=float, default=0.5,
+        help="First-Play Urgency value for unvisited variants (default 0.5). "
+        "Higher = more exploration of unvisited; tune above heuristic's typical "
+        "mean value (~0.55) to enable variant exploration.",
+    )
     ap.add_argument("--out", default="/tmp/mcts_picks_diag.json")
     args = ap.parse_args()
 
@@ -44,6 +50,7 @@ def main() -> int:
         turn_budget_ms=args.budget_ms,
         max_depth=args.max_depth,
         fixed_k_per_player=args.fixed_k,
+        fpu_c=args.fpu_c,
     )
 
     all_results: list[dict] = []

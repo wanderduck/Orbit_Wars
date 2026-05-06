@@ -64,3 +64,31 @@ class MCTSConfig:
     # Maps an "amount of ships" choice into discrete buckets so PW has a
     # finite action space to rank. M2 default; tunable in M3.
     ship_fraction_buckets: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)
+
+    # ---- Option 2 (single-launch token action space) knobs ----
+    # Per docs/research_documents/2026-05-06-mcts-option2-tokens-design.md.
+    #
+    # Compound-variant search (use_token_variants=False) is the legacy /
+    # M3 path: each MCTS step picks one full action list. Token search
+    # (use_token_variants=True) is the canonical SM-MCTS path: each MCTS
+    # sub-step picks one launch token, multiple launches per env-turn are
+    # composed via per-env-turn launch sub-trees, simulator advances when
+    # both players COMMIT (or hit max_launches_per_turn cap).
+
+    # Master toggle for option-2 architecture. Default False so M3 baseline
+    # remains the no-regression path until option 2 passes its local A/B gate.
+    use_token_variants: bool = False
+
+    # Number of fraction-bucket tokens emitted per LaunchDecision in the prior.
+    # Per design §4.5: chosen-bucket + (tokens_per_decision-1) nearest. Higher =
+    # richer prior but more cost to rank; default 3 = chosen + 2 neighbors.
+    tokens_per_decision: int = 3
+
+    # Per-env-turn sub-tree depth cap. Per design §3.2.2: bounds sub-tree size at
+    # (PW_k+1)^cap worst case. 4 ≈ heuristic's median per-turn launch count.
+    max_launches_per_turn: int = 4
+
+    # Whether to extend ranked_tokens with the long-tail (~530 src×target×bucket
+    # tokens). Default OFF per Risk 1 mitigation: enable selectively if M5 perf
+    # data shows long-tail matters in practice.
+    long_tail_enabled: bool = False
