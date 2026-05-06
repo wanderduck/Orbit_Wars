@@ -1,0 +1,651 @@
+{
+  "started_at": "2026-05-05T04:05:54.177548+00:00",
+  "candidates": [
+    "default",
+    "bestv2",
+    "bestv3",
+    "bestv4",
+    "bestv4_test"
+  ],
+  "candidate_configs": {
+    "default": {
+      "sim_horizon": 110,
+      "route_search_horizon": 60,
+      "attack_cost_turn_weight": 0.55,
+      "snipe_cost_turn_weight": 0.45,
+      "defense_cost_turn_weight": 0.4,
+      "reinforce_cost_turn_weight": 0.35,
+      "static_neutral_value_mult": 1.4,
+      "static_hostile_value_mult": 1.55,
+      "rotating_opening_value_mult": 0.9,
+      "hostile_target_value_mult": 1.85,
+      "opening_hostile_target_value_mult": 1.45,
+      "safe_neutral_value_mult": 1.2,
+      "contested_neutral_value_mult": 0.7,
+      "early_neutral_value_mult": 1.2,
+      "comet_value_mult": 0.65,
+      "reinforce_value_mult": 1.35,
+      "safety_margin": 1,
+      "home_reserve": 0,
+      "min_launch": 20,
+      "defense_buffer": 2,
+      "total_war_remaining_turns": 55,
+      "late_remaining_turns": 60,
+      "very_late_remaining_turns": 25,
+      "late_immediate_ship_value": 0.6,
+      "elimination_bonus": 18.0,
+      "weak_enemy_threshold": 45,
+      "reinforce_enabled": true,
+      "reinforce_min_production": 2,
+      "reinforce_max_travel_turns": 22,
+      "reinforce_safety_margin": 2,
+      "reinforce_max_source_fraction": 0.75,
+      "reinforce_min_future_turns": 40,
+      "reinforce_hold_lookahead": 20,
+      "use_hungarian_offense": false,
+      "soft_act_deadline_fraction": 0.82,
+      "heavy_route_planet_limit": 32,
+      "early_turn_limit": 40,
+      "opening_turn_limit": 80,
+      "static_target_score_mult": 1.18,
+      "early_static_neutral_score_mult": 1.25,
+      "snipe_score_mult": 1.12,
+      "swarm_score_mult": 1.06,
+      "crash_exploit_score_mult": 1.05,
+      "defense_frontier_score_mult": 1.12,
+      "behind_domination": -0.2,
+      "ahead_domination": 0.18,
+      "finishing_domination": 0.35,
+      "finishing_prod_ratio": 1.25,
+      "behind_attack_margin_penalty": 0.05,
+      "ahead_attack_margin_bonus": 0.08
+    },
+    "bestv2": {
+      "sim_horizon": 20,
+      "route_search_horizon": 120,
+      "attack_cost_turn_weight": 1.0655089099396764,
+      "snipe_cost_turn_weight": 0.42827339596789826,
+      "defense_cost_turn_weight": 0.38421021771160657,
+      "reinforce_cost_turn_weight": 0.5018948840471925,
+      "static_neutral_value_mult": 0.5194984568188837,
+      "static_hostile_value_mult": 1.08035016625398,
+      "rotating_opening_value_mult": 0.903843654960738,
+      "hostile_target_value_mult": 0.7247631332319227,
+      "opening_hostile_target_value_mult": 2.279364878800245,
+      "safe_neutral_value_mult": 1.1859484959512052,
+      "contested_neutral_value_mult": 0.7242330123363232,
+      "early_neutral_value_mult": 0.36883119500963607,
+      "comet_value_mult": 0.6151977103047142,
+      "reinforce_value_mult": 2.8590196105681267,
+      "safety_margin": 0,
+      "home_reserve": 0,
+      "min_launch": 1,
+      "defense_buffer": 0,
+      "total_war_remaining_turns": 100,
+      "late_remaining_turns": 20,
+      "very_late_remaining_turns": 3,
+      "late_immediate_ship_value": 1.2721484371169995,
+      "elimination_bonus": 24.228036650951815,
+      "weak_enemy_threshold": 3,
+      "reinforce_enabled": true,
+      "reinforce_min_production": 0,
+      "reinforce_max_travel_turns": 2,
+      "reinforce_safety_margin": 8,
+      "reinforce_max_source_fraction": 0.8790796400546337,
+      "reinforce_min_future_turns": 3,
+      "reinforce_hold_lookahead": 2,
+      "use_hungarian_offense": false,
+      "soft_act_deadline_fraction": 0.6138051956304836,
+      "heavy_route_planet_limit": 3,
+      "early_turn_limit": 3,
+      "opening_turn_limit": 10,
+      "static_target_score_mult": 0.5084520112192596,
+      "early_static_neutral_score_mult": 0.7617966660528044,
+      "snipe_score_mult": 0.6794600352196278,
+      "swarm_score_mult": 0.7448879100962822,
+      "crash_exploit_score_mult": 1.057478327357518,
+      "defense_frontier_score_mult": 1.9575379960017019,
+      "behind_domination": -0.0712944152696735,
+      "ahead_domination": 0.3351693148920725,
+      "finishing_domination": 0.43260343231474885,
+      "finishing_prod_ratio": 1.2976808312527104,
+      "behind_attack_margin_penalty": 0.10431926012969622,
+      "ahead_attack_margin_bonus": 0.10642227015287763
+    },
+    "bestv3": {
+      "sim_horizon": 20,
+      "route_search_horizon": 120,
+      "attack_cost_turn_weight": 1.0956435190784166,
+      "snipe_cost_turn_weight": 0.15014636037932633,
+      "defense_cost_turn_weight": 0.24853994043628416,
+      "reinforce_cost_turn_weight": 0.21982430814678333,
+      "static_neutral_value_mult": 0.40267908698518223,
+      "static_hostile_value_mult": 1.267087734861677,
+      "rotating_opening_value_mult": 0.4753430878630073,
+      "hostile_target_value_mult": 2.2950134166843137,
+      "opening_hostile_target_value_mult": 1.311411666546839,
+      "safe_neutral_value_mult": 0.5214409952079307,
+      "contested_neutral_value_mult": 0.3584166258986051,
+      "early_neutral_value_mult": 0.6799137314613836,
+      "comet_value_mult": 1.61585361237035,
+      "reinforce_value_mult": 1.6373404712922184,
+      "safety_margin": 0,
+      "home_reserve": 10,
+      "min_launch": 1,
+      "defense_buffer": 0,
+      "total_war_remaining_turns": 5,
+      "late_remaining_turns": 20,
+      "very_late_remaining_turns": 60,
+      "late_immediate_ship_value": 0.5524633397986852,
+      "elimination_bonus": 24.621869687876917,
+      "weak_enemy_threshold": 3,
+      "reinforce_enabled": true,
+      "reinforce_min_production": 0,
+      "reinforce_max_travel_turns": 2,
+      "reinforce_safety_margin": 8,
+      "reinforce_max_source_fraction": 0.9436949764414473,
+      "reinforce_min_future_turns": 3,
+      "reinforce_hold_lookahead": 60,
+      "use_hungarian_offense": false,
+      "soft_act_deadline_fraction": 0.8323743858575676,
+      "heavy_route_planet_limit": 3,
+      "early_turn_limit": 100,
+      "opening_turn_limit": 150,
+      "static_target_score_mult": 1.4056917293734157,
+      "early_static_neutral_score_mult": 1.2360897651301208,
+      "snipe_score_mult": 1.242503200918334,
+      "swarm_score_mult": 1.4529940053863368,
+      "crash_exploit_score_mult": 0.500001515251795,
+      "defense_frontier_score_mult": 1.2497844410228665,
+      "behind_domination": -0.15820757320409967,
+      "ahead_domination": 0.0018202098989539902,
+      "finishing_domination": 0.5291889334708204,
+      "finishing_prod_ratio": 1.0051920196930257,
+      "behind_attack_margin_penalty": 0.14153294979076625,
+      "ahead_attack_margin_bonus": 0.15756242948218518
+    },
+    "bestv4": {
+      "sim_horizon": 20,
+      "route_search_horizon": 120,
+      "attack_cost_turn_weight": 0.2708572547459229,
+      "snipe_cost_turn_weight": 0.479119488559405,
+      "defense_cost_turn_weight": 1.1401182964377135,
+      "reinforce_cost_turn_weight": 0.3218952648115774,
+      "static_neutral_value_mult": 1.902271007399417,
+      "static_hostile_value_mult": 1.404279985365543,
+      "rotating_opening_value_mult": 0.44699701162175765,
+      "hostile_target_value_mult": 2.760328795888836,
+      "opening_hostile_target_value_mult": 0.3142554242640122,
+      "safe_neutral_value_mult": 0.30182795746251495,
+      "contested_neutral_value_mult": 0.750805161488503,
+      "early_neutral_value_mult": 2.495811004888136,
+      "comet_value_mult": 0.3361647318597272,
+      "reinforce_value_mult": 2.3250956999409143,
+      "safety_margin": 0,
+      "home_reserve": 10,
+      "min_launch": 1,
+      "defense_buffer": 8,
+      "total_war_remaining_turns": 5,
+      "late_remaining_turns": 20,
+      "very_late_remaining_turns": 60,
+      "late_immediate_ship_value": 0.2901831227324685,
+      "elimination_bonus": 5.451827843639155,
+      "weak_enemy_threshold": 3,
+      "reinforce_enabled": true,
+      "reinforce_min_production": 0,
+      "reinforce_max_travel_turns": 2,
+      "reinforce_safety_margin": 0,
+      "reinforce_max_source_fraction": 0.8747722100465198,
+      "reinforce_min_future_turns": 100,
+      "reinforce_hold_lookahead": 2,
+      "use_hungarian_offense": false,
+      "soft_act_deadline_fraction": 0.8556444572947275,
+      "heavy_route_planet_limit": 3,
+      "early_turn_limit": 100,
+      "opening_turn_limit": 150,
+      "static_target_score_mult": 1.1195278482874094,
+      "early_static_neutral_score_mult": 0.9290703107893624,
+      "snipe_score_mult": 0.9376201181571016,
+      "swarm_score_mult": 1.3346846200498328,
+      "crash_exploit_score_mult": 1.0325363605151456,
+      "defense_frontier_score_mult": 0.6014987419676794,
+      "behind_domination": -0.24107605540974308,
+      "ahead_domination": 0.23583793619367288,
+      "finishing_domination": 0.20857278702863408,
+      "finishing_prod_ratio": 1.8183691678482166,
+      "behind_attack_margin_penalty": 0.1366661117158154,
+      "ahead_attack_margin_bonus": 0.12279410147131044
+    },
+    "bestv4_test": {
+      "sim_horizon": 90,
+      "route_search_horizon": 120,
+      "attack_cost_turn_weight": 0.2708572547459229,
+      "snipe_cost_turn_weight": 0.479119488559405,
+      "defense_cost_turn_weight": 1.1401182964377135,
+      "reinforce_cost_turn_weight": 0.3218952648115774,
+      "static_neutral_value_mult": 1.902271007399417,
+      "static_hostile_value_mult": 1.404279985365543,
+      "rotating_opening_value_mult": 0.44699701162175765,
+      "hostile_target_value_mult": 2.760328795888836,
+      "opening_hostile_target_value_mult": 0.3142554242640122,
+      "safe_neutral_value_mult": 0.30182795746251495,
+      "contested_neutral_value_mult": 0.750805161488503,
+      "early_neutral_value_mult": 2.495811004888136,
+      "comet_value_mult": 0.3361647318597272,
+      "reinforce_value_mult": 2.3250956999409143,
+      "safety_margin": 0,
+      "home_reserve": 10,
+      "min_launch": 1,
+      "defense_buffer": 8,
+      "total_war_remaining_turns": 50,
+      "late_remaining_turns": 20,
+      "very_late_remaining_turns": 60,
+      "late_immediate_ship_value": 0.2901831227324685,
+      "elimination_bonus": 5.451827843639155,
+      "weak_enemy_threshold": 3,
+      "reinforce_enabled": true,
+      "reinforce_min_production": 0,
+      "reinforce_max_travel_turns": 18,
+      "reinforce_safety_margin": 0,
+      "reinforce_max_source_fraction": 0.8747722100465198,
+      "reinforce_min_future_turns": 100,
+      "reinforce_hold_lookahead": 2,
+      "use_hungarian_offense": false,
+      "soft_act_deadline_fraction": 0.8556444572947275,
+      "heavy_route_planet_limit": 3,
+      "early_turn_limit": 100,
+      "opening_turn_limit": 150,
+      "static_target_score_mult": 1.1195278482874094,
+      "early_static_neutral_score_mult": 0.9290703107893624,
+      "snipe_score_mult": 0.9376201181571016,
+      "swarm_score_mult": 1.3346846200498328,
+      "crash_exploit_score_mult": 1.0325363605151456,
+      "defense_frontier_score_mult": 0.6014987419676794,
+      "behind_domination": -0.24107605540974308,
+      "ahead_domination": 0.23583793619367288,
+      "finishing_domination": 0.20857278702863408,
+      "finishing_prod_ratio": 1.8183691678482166,
+      "behind_attack_margin_penalty": 0.1366661117158154,
+      "ahead_attack_margin_bonus": 0.12279410147131044
+    }
+  },
+  "games_2p_per_pair": 2,
+  "games_4p_per_candidate": 2,
+  "sample_seed": 42,
+  "workers": 4,
+  "results_2p": [
+    [
+      "bestv2",
+      "bestv4",
+      102006,
+      2.0
+    ],
+    [
+      "bestv2",
+      "bestv4",
+      102007,
+      -2.0
+    ],
+    [
+      "bestv2",
+      "bestv4_test",
+      102008,
+      -2.0
+    ],
+    [
+      "bestv2",
+      "bestv4_test",
+      102009,
+      2.0
+    ],
+    [
+      "bestv2",
+      "default",
+      102000,
+      2.0
+    ],
+    [
+      "bestv2",
+      "default",
+      102001,
+      -2.0
+    ],
+    [
+      "bestv2",
+      "bestv3",
+      102004,
+      -2.0
+    ],
+    [
+      "bestv2",
+      "bestv3",
+      102005,
+      2.0
+    ],
+    [
+      "default",
+      "bestv2",
+      100002,
+      2.0
+    ],
+    [
+      "default",
+      "bestv2",
+      100003,
+      -2.0
+    ],
+    [
+      "default",
+      "bestv3",
+      100004,
+      -2.0
+    ],
+    [
+      "default",
+      "bestv3",
+      100005,
+      -2.0
+    ],
+    [
+      "default",
+      "bestv4",
+      100006,
+      -2.0
+    ],
+    [
+      "default",
+      "bestv4",
+      100007,
+      -2.0
+    ],
+    [
+      "default",
+      "bestv4_test",
+      100008,
+      -2.0
+    ],
+    [
+      "default",
+      "bestv4_test",
+      100009,
+      -2.0
+    ],
+    [
+      "bestv3",
+      "bestv4",
+      104006,
+      2.0
+    ],
+    [
+      "bestv3",
+      "bestv4",
+      104007,
+      2.0
+    ],
+    [
+      "bestv3",
+      "bestv4_test",
+      104008,
+      -2.0
+    ],
+    [
+      "bestv3",
+      "bestv4_test",
+      104009,
+      -2.0
+    ],
+    [
+      "bestv3",
+      "default",
+      104000,
+      -2.0
+    ],
+    [
+      "bestv3",
+      "default",
+      104001,
+      -2.0
+    ],
+    [
+      "bestv3",
+      "bestv2",
+      104002,
+      -2.0
+    ],
+    [
+      "bestv3",
+      "bestv2",
+      104003,
+      2.0
+    ],
+    [
+      "bestv4",
+      "default",
+      106000,
+      2.0
+    ],
+    [
+      "bestv4",
+      "default",
+      106001,
+      2.0
+    ],
+    [
+      "bestv4",
+      "bestv2",
+      106002,
+      2.0
+    ],
+    [
+      "bestv4",
+      "bestv2",
+      106003,
+      -2.0
+    ],
+    [
+      "bestv4_test",
+      "default",
+      108000,
+      -2.0
+    ],
+    [
+      "bestv4_test",
+      "default",
+      108001,
+      -2.0
+    ],
+    [
+      "bestv4_test",
+      "bestv2",
+      108002,
+      -2.0
+    ],
+    [
+      "bestv4_test",
+      "bestv2",
+      108003,
+      -2.0
+    ],
+    [
+      "bestv4",
+      "bestv3",
+      106004,
+      -2.0
+    ],
+    [
+      "bestv4",
+      "bestv3",
+      106005,
+      2.0
+    ],
+    [
+      "bestv4",
+      "bestv4_test",
+      106008,
+      2.0
+    ],
+    [
+      "bestv4",
+      "bestv4_test",
+      106009,
+      2.0
+    ],
+    [
+      "bestv4_test",
+      "bestv3",
+      108004,
+      -2.0
+    ],
+    [
+      "bestv4_test",
+      "bestv3",
+      108005,
+      2.0
+    ],
+    [
+      "bestv4_test",
+      "bestv4",
+      108006,
+      -2.0
+    ],
+    [
+      "bestv4_test",
+      "bestv4",
+      108007,
+      2.0
+    ]
+  ],
+  "results_4p": [
+    [
+      "bestv4_test",
+      [
+        "bestv4",
+        "bestv2",
+        "bestv3"
+      ],
+      600000,
+      0
+    ],
+    [
+      "bestv4_test",
+      [
+        "bestv2",
+        "default",
+        "bestv4"
+      ],
+      600001,
+      0
+    ],
+    [
+      "default",
+      [
+        "bestv2",
+        "bestv4_test",
+        "bestv3"
+      ],
+      200000,
+      1
+    ],
+    [
+      "default",
+      [
+        "bestv3",
+        "bestv2",
+        "bestv4"
+      ],
+      200001,
+      1
+    ],
+    [
+      "bestv2",
+      [
+        "default",
+        "bestv4",
+        "bestv4_test"
+      ],
+      300000,
+      0
+    ],
+    [
+      "bestv2",
+      [
+        "bestv4_test",
+        "default",
+        "bestv4"
+      ],
+      300001,
+      0
+    ],
+    [
+      "bestv3",
+      [
+        "default",
+        "bestv4_test",
+        "bestv4"
+      ],
+      400000,
+      0
+    ],
+    [
+      "bestv3",
+      [
+        "default",
+        "bestv4",
+        "bestv4_test"
+      ],
+      400001,
+      0
+    ],
+    [
+      "bestv4",
+      [
+        "bestv4_test",
+        "default",
+        "bestv2"
+      ],
+      500000,
+      0
+    ],
+    [
+      "bestv4",
+      [
+        "bestv3",
+        "default",
+        "bestv4_test"
+      ],
+      500001,
+      0
+    ]
+  ],
+  "completed_at": "2026-05-05T04:07:35.511986+00:00",
+  "summary": {
+    "avg_margin_2p": {
+      "default": -1.5,
+      "bestv2": 0.0,
+      "bestv3": -0.5,
+      "bestv4": 1.0,
+      "bestv4_test": -1.0
+    },
+    "win_rate_2p": {
+      "default": 0.125,
+      "bestv2": 0.5,
+      "bestv3": 0.375,
+      "bestv4": 0.75,
+      "bestv4_test": 0.25
+    },
+    "win_rate_4p": {
+      "bestv4_test": 0.0,
+      "default": 1.0,
+      "bestv2": 0.0,
+      "bestv3": 0.0,
+      "bestv4": 0.0
+    },
+    "known_ladder_mu": {
+      "default": null,
+      "bestv2": 717.1,
+      "bestv3": 733.8,
+      "bestv4": null,
+      "bestv4_test": null
+    }
+  }
+}
