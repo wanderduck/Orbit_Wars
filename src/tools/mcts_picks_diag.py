@@ -36,9 +36,17 @@ def main() -> int:
     ap.add_argument("--fixed-k", type=int, default=8)
     ap.add_argument(
         "--fpu-c", type=float, default=0.5,
-        help="First-Play Urgency value for unvisited variants (default 0.5). "
-        "Higher = more exploration of unvisited; tune above heuristic's typical "
-        "mean value (~0.55) to enable variant exploration.",
+        help="First-Play Urgency value for unvisited variants (default 0.5).",
+    )
+    ap.add_argument(
+        "--use-token-variants", action="store_true",
+        help="Enable option-2 single-launch-token search (default: legacy "
+        "compound-variant). With this flag, the diagnostic logs committed "
+        "token sequences per turn instead of variant indices.",
+    )
+    ap.add_argument(
+        "--max-launches-per-turn", type=int, default=4,
+        help="Per-env-turn launch sub-tree cap (option-2 only).",
     )
     ap.add_argument("--out", default="/tmp/mcts_picks_diag.json")
     args = ap.parse_args()
@@ -51,6 +59,8 @@ def main() -> int:
         max_depth=args.max_depth,
         fixed_k_per_player=args.fixed_k,
         fpu_c=args.fpu_c,
+        use_token_variants=args.use_token_variants,
+        max_launches_per_turn=args.max_launches_per_turn,
     )
 
     all_results: list[dict] = []
@@ -77,39 +87,70 @@ def main() -> int:
             else "TIE"
         )
 
-        # Aggregate variant-pick distribution
-        idx_counter: Counter[int] = Counter()
+        # Aggregate distribution. Two debug shapes:
+        #  - Legacy (use_token_variants=False): debug has "our_action_idx" int.
+        #    Aggregate by variant index (0=heuristic, 1=HOLD, 2..k=drop-one).
+        #  - Token (use_token_variants=True): debug has "our_token_indices" list.
+        #    Aggregate by sequence "type" — distinct sequences and per-sequence
+        #    counts, plus pick-count distribution.
+        idx_counter: Counter[int] = Counter()  # legacy mode
+        seq_counter: Counter[tuple[int, ...]] = Counter()  # token mode
+        pick_count_counter: Counter[int] = Counter()  # token mode
         fallback_counter: Counter[str] = Counter()
-        n_zero_action_turns = 0  # turns where our action_list is empty
 
         for d in per_turn:
             if "fallback" in d:
                 fallback_counter[d["fallback"]] += 1
                 continue
-            idx = d.get("our_action_idx")
-            if idx is None:
-                continue
-            idx_counter[idx] += 1
+            if args.use_token_variants:
+                seq = tuple(d.get("our_token_indices", []))
+                seq_counter[seq] += 1
+                pick_count_counter[len(seq)] += 1
+            else:
+                idx = d.get("our_action_idx")
+                if idx is None:
+                    continue
+                idx_counter[idx] += 1
 
-        result = {
+        result: dict = {
             "seed": seed,
             "outcome": outcome,
             "n_turns": len(per_turn),
-            "variant_pick_distribution": dict(sorted(idx_counter.items())),
             "fallbacks": dict(fallback_counter),
+            "use_token_variants": args.use_token_variants,
         }
+        if args.use_token_variants:
+            # Convert tuple keys to JSON-friendly strings ("[1,5,3]")
+            result["token_sequence_distribution"] = {
+                str(list(seq)): cnt for seq, cnt in seq_counter.most_common(20)
+            }
+            result["pick_count_distribution"] = dict(sorted(pick_count_counter.items()))
+            result["distinct_sequences"] = len(seq_counter)
+        else:
+            result["variant_pick_distribution"] = dict(sorted(idx_counter.items()))
         all_results.append(result)
 
         # Pretty print
         print(f"\n=== Seed {seed} → {outcome} ({len(per_turn)} turns) ===")
-        for idx, count in sorted(idx_counter.items()):
-            label = (
-                "heuristic" if idx == 0
-                else "HOLD" if idx == 1
-                else f"drop-one #{idx-1}"
-            )
-            pct = 100.0 * count / len(per_turn) if per_turn else 0.0
-            print(f"  variant {idx} ({label:>15}): {count:>4} turns ({pct:5.1f}%)")
+        if args.use_token_variants:
+            print(f"  distinct sequences:    {len(seq_counter)}")
+            print(f"  pick count distribution: {dict(sorted(pick_count_counter.items()))}")
+            print(f"  top sequences:")
+            for seq, cnt in seq_counter.most_common(5):
+                pct = 100.0 * cnt / len(per_turn) if per_turn else 0.0
+                # Decode: 0 = COMMIT, 1+ = heuristic-derived tokens
+                label = ("[]" if not seq else
+                         f"{list(seq)}")
+                print(f"    {label:<35}  {cnt:>4} turns ({pct:5.1f}%)")
+        else:
+            for idx, count in sorted(idx_counter.items()):
+                label = (
+                    "heuristic" if idx == 0
+                    else "HOLD" if idx == 1
+                    else f"drop-one #{idx-1}"
+                )
+                pct = 100.0 * count / len(per_turn) if per_turn else 0.0
+                print(f"  variant {idx} ({label:>15}): {count:>4} turns ({pct:5.1f}%)")
         if fallback_counter:
             print(f"  fallbacks: {dict(fallback_counter)}")
 
