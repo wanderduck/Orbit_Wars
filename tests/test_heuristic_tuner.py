@@ -103,11 +103,12 @@ class TestRunOneGame:
 
 class TestEvaluateFitnessLocal:
     def test_local_smoke_returns_well_formed_dict(self) -> None:
-        """Run a tiny budget end-to-end. Verify output dict has expected keys + types."""
-        from tools.modal_tuner import (
-            FITNESS_OPPONENTS,
-            evaluate_fitness_local,
-        )
+        """Run a tiny budget end-to-end. Verify output dict has expected keys + types.
+
+        Plan A retool: per_opp now contains a single key "4p_graduated" (was the
+        2P anchor + per-archive matchups before).
+        """
+        from tools.modal_tuner import evaluate_fitness_local
 
         cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
                     for f in fields(HeuristicConfig)}
@@ -127,8 +128,8 @@ class TestEvaluateFitnessLocal:
         assert result["generation"] == 0
         assert isinstance(result["sanity_pass"], bool)
         assert isinstance(result["fitness"], float)
-        # per_opp must contain exactly the configured fitness opponents
-        assert set(result["per_opp"].keys()) == set(FITNESS_OPPONENTS)
+        # 4P retool: per_opp has the single graduated-score entry
+        assert set(result["per_opp"].keys()) == {"4p_graduated"}
         # Sanity may early-exit on first failing opponent; only require at least one entry
         assert len(result["sanity_winrates"]) >= 1
 
@@ -161,11 +162,13 @@ class TestProfileAndCostGuard:
         assert cost < 1.0
 
     def test_default_profile_at_expected_cost(self) -> None:
+        """Plan A 4P retool: default profile is 50 popsize × 15 gens × 33 4P games."""
         from tools.modal_tuner import _choose_profile
         pop, gens, games, cost = _choose_profile("default", None, None, None)
-        assert pop == 50 and gens == 15 and games == 69
-        # ~$130 with archive included; tolerance for either side
-        assert 100.0 <= cost <= 160.0
+        assert pop == 50 and gens == 15 and games == 33
+        # ~$130 baseline cost projection; cost meter overestimates 4-5x per
+        # CLAUDE.md memory, so this is a wide tolerance band.
+        assert 50.0 <= cost <= 250.0
 
     def test_overrides_recompute_cost(self) -> None:
         from tools.modal_tuner import _choose_profile
@@ -212,13 +215,14 @@ class TestRollingArchive:
         assert abs(avg - 1.8) < 0.01
 
     def test_evaluate_fitness_local_with_archive(self) -> None:
-        """evaluate_fitness_local accepts archive_opponents and includes them in per_opp."""
-        from tools.modal_tuner import (
-            ANCHOR_WEIGHT,
-            ARCHIVE_WEIGHT_TOTAL,
-            FITNESS_ANCHOR,
-            evaluate_fitness_local,
-        )
+        """evaluate_fitness_local with 1-2 archive entries: opponents mix archive + starter.
+
+        Plan A retool: per_opp shape changed to {"4p_graduated": <score>} —
+        no longer per-opponent (4P games combine 3 opponents per game).
+        Verifies the function accepts archive_opponents without error and
+        produces a graduated score.
+        """
+        from tools.modal_tuner import evaluate_fitness_local
 
         cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
                     for f in fields(HeuristicConfig)}
@@ -238,16 +242,18 @@ class TestRollingArchive:
             sanity_threshold=0.91,
             archive_opponents=archive_opponents,
         )
-        # per_opp must contain anchor + each archive entry
-        assert FITNESS_ANCHOR in result["per_opp"]
-        assert "archive_test_0" in result["per_opp"]
-        # Sanity check on weight math: with one archive entry, anchor weight + archive weight = 1
-        # (we don't verify the exact arithmetic since it depends on ANCHOR_WEIGHT/ARCHIVE_WEIGHT_TOTAL)
-        assert ANCHOR_WEIGHT + ARCHIVE_WEIGHT_TOTAL == pytest.approx(1.0)
+        # per_opp shape changed for 4P retool — single graduated key
+        assert set(result["per_opp"].keys()) == {"4p_graduated"}
+        assert isinstance(result["fitness"], float)
+        assert -1.0 <= result["fitness"] <= 1.0
 
-    def test_evaluate_fitness_local_no_archive_backward_compat(self) -> None:
-        """When archive_opponents is None, fitness equals anchor margin (full weight)."""
-        from tools.modal_tuner import FITNESS_ANCHOR, evaluate_fitness_local
+    def test_evaluate_fitness_local_4p_no_archive_uses_starter_opponents(self) -> None:
+        """When archive_opponents is None, fitness phase plays 4P vs 3 starters
+        and returns mean graduated score (range [-1, +1]).
+
+        Replaces the old 2P backward-compat test (Plan A retool, 2026-05-05).
+        """
+        from tools.modal_tuner import evaluate_fitness_local
 
         cfg_dict = {f.name: getattr(HeuristicConfig.default(), f.name)
                     for f in fields(HeuristicConfig)}
@@ -256,11 +262,183 @@ class TestRollingArchive:
             candidate_id=0,
             generation=0,
             sanity_n_per_opponent=2,
-            fitness_n_per_opponent=2,
+            fitness_n_per_opponent=2,    # only 2 4P games for speed in this test
             sanity_threshold=0.91,
             archive_opponents=None,
         )
-        # No archive → only anchor in per_opp
-        assert set(result["per_opp"].keys()) == {FITNESS_ANCHOR}
-        # fitness should equal anchor margin (since weight is 1.0)
-        assert result["fitness"] == pytest.approx(result["per_opp"][FITNESS_ANCHOR])
+        # Single key in per_opp — graduated 4P score.
+        assert set(result["per_opp"].keys()) == {"4p_graduated"}
+        # fitness equals the per_opp value
+        assert result["fitness"] == pytest.approx(result["per_opp"]["4p_graduated"])
+        # Graduated scores are in [-1, +1] → mean is also in that range.
+        assert -1.0 <= result["fitness"] <= 1.0
+        # Default config vs 3 starters should typically score positively
+        # (heuristic agent beats random launch ratio of starter), but we
+        # don't assert that strictly — small sample size + RNG variance.
+
+
+class TestGraduatedScores:
+    """Test the 4P graduated placement scoring helper (Plan A retool)."""
+
+    def test_no_ties_returns_canonical_ranks(self) -> None:
+        from tools.modal_tuner import graduated_scores
+        scores = graduated_scores([100.0, 50.0, 30.0, 0.0])
+        assert scores == [1.0, 1.0 / 3.0, -1.0 / 3.0, -1.0]
+
+    def test_scores_returned_in_input_order(self) -> None:
+        """Player 2 has the highest count → result[2] == +1."""
+        from tools.modal_tuner import graduated_scores
+        scores = graduated_scores([10.0, 30.0, 100.0, 50.0])
+        assert scores[2] == 1.0          # rank 1
+        assert scores[3] == 1.0 / 3.0    # rank 2
+        assert scores[1] == -1.0 / 3.0   # rank 3
+        assert scores[0] == -1.0         # rank 4
+
+    def test_two_way_tie_at_top_averages_first_two_ranks(self) -> None:
+        from tools.modal_tuner import graduated_scores
+        scores = graduated_scores([100.0, 100.0, 30.0, 0.0])
+        # Players 0,1 tied at top → avg(1, 1/3) = 2/3
+        assert scores[0] == pytest.approx(2.0 / 3.0)
+        assert scores[1] == pytest.approx(2.0 / 3.0)
+        assert scores[2] == pytest.approx(-1.0 / 3.0)
+        assert scores[3] == pytest.approx(-1.0)
+
+    def test_three_way_tie_at_bottom(self) -> None:
+        from tools.modal_tuner import graduated_scores
+        scores = graduated_scores([100.0, 50.0, 50.0, 50.0])
+        # Players 1,2,3 tied → avg(1/3, -1/3, -1) = -1/3
+        assert scores[0] == 1.0
+        assert scores[1] == pytest.approx(-1.0 / 3.0)
+        assert scores[2] == pytest.approx(-1.0 / 3.0)
+        assert scores[3] == pytest.approx(-1.0 / 3.0)
+
+    def test_all_tied_each_gets_zero(self) -> None:
+        from tools.modal_tuner import graduated_scores
+        scores = graduated_scores([50.0, 50.0, 50.0, 50.0])
+        # avg(1, 1/3, -1/3, -1) = 0
+        for s in scores:
+            assert s == pytest.approx(0.0)
+
+    def test_sum_is_zero_zero_sum_invariant(self) -> None:
+        """Whatever the rankings, total scores sum to zero (zero-sum tournament)."""
+        from tools.modal_tuner import graduated_scores
+        for asset_counts in (
+            [100.0, 50.0, 30.0, 0.0],
+            [100.0, 100.0, 30.0, 0.0],
+            [50.0, 50.0, 50.0, 50.0],
+            [100.0, 50.0, 50.0, 50.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ):
+            scores = graduated_scores(asset_counts)
+            assert sum(scores) == pytest.approx(0.0)
+
+    def test_rejects_non_4p_input(self) -> None:
+        from tools.modal_tuner import graduated_scores
+        with pytest.raises(ValueError):
+            graduated_scores([1.0, 2.0])
+        with pytest.raises(ValueError):
+            graduated_scores([1.0, 2.0, 3.0])
+        with pytest.raises(ValueError):
+            graduated_scores([1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+class TestComputePlayerAssets:
+    """Test the per-player asset count helper (Plan A retool)."""
+
+    def _make_obs(self, planets, fleets):
+        """Helper: minimal env-like obs object with .planets and .fleets."""
+        class _Obs:
+            pass
+        obs = _Obs()
+        obs.planets = planets
+        obs.fleets = fleets
+        return obs
+
+    def test_planets_only_summed_per_owner(self) -> None:
+        from tools.modal_tuner import compute_player_assets
+        # planets shape: [id, owner, x, y, radius, ships, prod]
+        obs = self._make_obs(
+            planets=[
+                [0, 0, 0, 0, 2, 50, 1],   # player 0: 50 ships
+                [1, 1, 0, 0, 2, 30, 1],   # player 1: 30 ships
+                [2, -1, 0, 0, 2, 100, 1], # neutral: not counted
+            ],
+            fleets=[],
+        )
+        assets = compute_player_assets(obs)
+        assert assets[0] == 50.0
+        assert assets[1] == 30.0
+
+    def test_fleets_added_to_owner_assets(self) -> None:
+        from tools.modal_tuner import compute_player_assets
+        obs = self._make_obs(
+            planets=[[0, 0, 0, 0, 2, 50, 1]],
+            # fleets shape: [id, owner, x, y, angle, from_id, ships]
+            fleets=[
+                [0, 0, 5, 5, 0, 0, 10],   # player 0 fleet: +10 ships
+                [1, 1, 5, 5, 0, 0, 25],   # player 1 fleet: 25 ships
+            ],
+        )
+        assets = compute_player_assets(obs)
+        assert assets[0] == 60.0  # 50 planet + 10 fleet
+        assert assets[1] == 25.0  # 0 planet + 25 fleet
+
+    def test_neutral_planets_not_counted_for_anyone(self) -> None:
+        from tools.modal_tuner import compute_player_assets
+        obs = self._make_obs(
+            planets=[
+                [0, 0, 0, 0, 2, 50, 1],
+                [1, -1, 0, 0, 2, 999, 1],  # neutral with huge ship count
+            ],
+            fleets=[],
+        )
+        assets = compute_player_assets(obs)
+        assert assets[0] == 50.0
+        assert sum(assets) == 50.0  # neutral 999 not in any player's total
+
+
+class TestSelect4pOpponents:
+    """Test the 4P opponent sampling helper (Plan A retool)."""
+
+    def test_full_archive_samples_three_without_replacement(self) -> None:
+        import random as r
+        from tools.modal_tuner import _select_4p_opponents
+        archive = [
+            {"name": "best-g3", "cfg_dict": {"a": 1}},
+            {"name": "best-g6", "cfg_dict": {"a": 2}},
+            {"name": "best-g9", "cfg_dict": {"a": 3}},
+            {"name": "best-g12", "cfg_dict": {"a": 4}},
+            {"name": "best-g15", "cfg_dict": {"a": 5}},
+        ]
+        chosen = _select_4p_opponents(archive, num_needed=3, rng=r.Random(42))
+        assert len(chosen) == 3
+        # All from archive (no fallback needed)
+        names = [c["name"] for c in chosen if isinstance(c, dict)]
+        assert len(names) == 3
+        # No duplicates
+        assert len(set(names)) == 3
+
+    def test_empty_archive_falls_back_to_starter_for_all(self) -> None:
+        from tools.modal_tuner import _select_4p_opponents
+        chosen = _select_4p_opponents([], num_needed=3)
+        assert chosen == ["starter", "starter", "starter"]
+
+    def test_partial_archive_uses_all_then_pads_with_starter(self) -> None:
+        from tools.modal_tuner import _select_4p_opponents
+        archive = [{"name": "best-g3", "cfg_dict": {"a": 1}}]
+        chosen = _select_4p_opponents(archive, num_needed=3)
+        assert len(chosen) == 3
+        # First the 1 archive entry, then 2 starters
+        assert chosen[0] == archive[0]
+        assert chosen[1] == "starter"
+        assert chosen[2] == "starter"
+
+    def test_seeded_rng_gives_reproducible_sample(self) -> None:
+        import random as r
+        from tools.modal_tuner import _select_4p_opponents
+        archive = [
+            {"name": f"best-g{i}", "cfg_dict": {"i": i}} for i in range(10)
+        ]
+        a = _select_4p_opponents(archive, num_needed=3, rng=r.Random(7))
+        b = _select_4p_opponents(archive, num_needed=3, rng=r.Random(7))
+        assert [c["name"] for c in a] == [c["name"] for c in b]

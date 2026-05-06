@@ -193,6 +193,169 @@ def _winrate(margins: list[float]) -> float:
     return wins / len(margins)
 
 
+# ---------------------------------------------------------------------------
+# 4P fitness helpers (Plan A retool, 2026-05-05 kickoff brief)
+# ---------------------------------------------------------------------------
+
+# Per-rank score for graduated_scores. 1st gets +1, 2nd gets +1/3, etc.
+# Sum is 0 (zero-sum across the 4 players).
+GRADUATED_RANK_SCORES: tuple[float, ...] = (1.0, 1.0 / 3.0, -1.0 / 3.0, -1.0)
+
+
+def graduated_scores(asset_counts: list[float]) -> list[float]:
+    """Compute graduated placement scores [+1, +1/3, -1/3, -1] from asset counts.
+
+    Players are ranked by ``asset_counts`` (highest = rank 1). Tied players
+    receive the AVERAGE of their tied ranks' scores. Sum across all returned
+    scores equals zero (zero-sum tournament scoring).
+
+    Returns scores in the SAME ORDER as ``asset_counts`` (i.e. result[i] is
+    player i's score, not the i-th best score).
+
+    Example:
+        graduated_scores([100, 50, 30, 0]) → [+1, +1/3, -1/3, -1]
+        graduated_scores([100, 100, 30, 0]) → [+2/3, +2/3, -1/3, -1]
+                                              # players 0,1 tied at top → avg(1, 1/3) = 2/3
+        graduated_scores([100, 50, 50, 50]) → [+1, -1/9, -1/9, -1/9]
+                                              # players 1,2,3 tied → avg(1/3, -1/3, -1) = -1/9
+    """
+    if len(asset_counts) != 4:
+        raise ValueError(
+            f"graduated_scores expects exactly 4 players (4P fitness); got {len(asset_counts)}"
+        )
+
+    # Group player indices by asset count (descending). Tied groups share scores.
+    indexed = sorted(enumerate(asset_counts), key=lambda kv: -kv[1])
+    scores = [0.0] * 4
+
+    i = 0
+    while i < 4:
+        # Find the run of players tied with indexed[i].
+        j = i
+        while j < 4 and indexed[j][1] == indexed[i][1]:
+            j += 1
+        # Average the rank scores for ranks [i, j).
+        tied_avg = sum(GRADUATED_RANK_SCORES[k] for k in range(i, j)) / (j - i)
+        for k in range(i, j):
+            scores[indexed[k][0]] = tied_avg
+        i = j
+
+    return scores
+
+
+def _select_4p_opponents(
+    archive_opponents: list[dict],
+    *,
+    num_needed: int = 3,
+    rng: random.Random | None = None,
+) -> list[dict | str]:
+    """Pick `num_needed` opponents for a 4P fitness game.
+
+    Strategy (per kickoff brief Section 2.1):
+      - Pure rolling-archive co-evolution: sample WITHOUT replacement when
+        the archive has enough entries.
+      - Fall back to "starter" (the env's built-in baseline) when archive
+        has too few entries to fill all 3 slots.
+
+    Returns a list of length ``num_needed`` where each entry is either:
+      - a dict with keys {"name": str, "cfg_dict": dict} (archive entry), OR
+      - the string ``"starter"`` (built-in baseline fallback).
+
+    The dict-or-string union mirrors the env-side dispatch in run_one_game_4p.
+
+    Use a seeded ``rng`` (random.Random(seed)) for reproducible sampling
+    within a generation; default uses the module-level random state.
+    """
+    if rng is None:
+        rng = random
+    if len(archive_opponents) >= num_needed:
+        return list(rng.sample(archive_opponents, num_needed))
+    # Not enough archive entries — use what we have, pad with starter.
+    chosen: list[dict | str] = list(archive_opponents)
+    while len(chosen) < num_needed:
+        chosen.append("starter")
+    return chosen
+
+
+def run_one_game_4p(
+    candidate_cfg: dict, opponents: list[dict | str], seed: int,
+) -> list[float]:
+    """Run one 4P FFA Orbit Wars game; return graduated_scores per player.
+
+    Players assigned:
+      - position 0: candidate_cfg (the candidate being evaluated)
+      - positions 1-3: opponents[0..2] — each is either an archive dict
+        ({"name": str, "cfg_dict": dict}) or the literal string "starter"
+        (the env's built-in baseline agent)
+
+    Returns a list of length 4 where result[i] is player i's graduated
+    placement score for this game (summing to zero across the 4).
+
+    Uses compute_player_assets on the FINAL observation to derive ranks,
+    then graduated_scores for the [+1, +1/3, -1/3, -1] mapping.
+    """
+    from kaggle_environments import make
+
+    if len(opponents) != 3:
+        raise ValueError(
+            f"run_one_game_4p needs exactly 3 opponents (4P FFA total); got {len(opponents)}"
+        )
+
+    agents: list = [make_configured_agent(candidate_cfg)]
+    for opp in opponents:
+        if opp == "starter":
+            agents.append("starter")
+        elif isinstance(opp, dict) and "cfg_dict" in opp:
+            agents.append(make_configured_agent(opp["cfg_dict"]))
+        else:
+            raise TypeError(
+                f"Opponent must be 'starter' or dict with 'cfg_dict'; got {opp!r}"
+            )
+
+    env = make("orbit_wars", configuration={"seed": seed}, debug=False)
+    env.run(agents)
+    # Final observation has the post-game asset state.
+    final_obs = env.steps[-1][0].observation
+    assets = compute_player_assets(final_obs)
+    # Pad to 4 if anyone is missing (eliminated player has zero assets and
+    # might not appear in the inferred owner-id range).
+    while len(assets) < 4:
+        assets.append(0.0)
+    return graduated_scores(assets[:4])
+
+
+def compute_player_assets(obs) -> list[float]:
+    """Sum each player's planet ships + in-flight fleet ships.
+
+    Mirrors env L687-693 alive-player logic (a player is alive iff they own
+    >=1 planet OR have >=1 fleet in flight). For graduated scoring we want
+    the actual asset COUNT, not just alive/dead, so we sum.
+
+    Returns a list of length ``num_players`` where index i = player i's total.
+    """
+    num_players = len(set(p[1] for p in obs.planets if p[1] != -1)) or 0
+    # Robust: derive num_players from agent count if obs has it; otherwise
+    # max owner id + 1 (env uses 0..N-1).
+    max_owner = -1
+    for p in obs.planets:
+        if p[1] != -1 and p[1] > max_owner:
+            max_owner = p[1]
+    for f in obs.fleets:
+        if f[1] > max_owner:
+            max_owner = f[1]
+    num_players = max(num_players, max_owner + 1)
+    if num_players <= 0:
+        return []
+
+    assets = [0.0] * num_players
+    for p in obs.planets:
+        if p[1] != -1:
+            assets[p[1]] += float(p[5])  # planet ships
+    for f in obs.fleets:
+        assets[f[1]] += float(f[6])  # fleet ships
+    return assets
+
+
 def _write_best_config_py(
     path: Path,
     cfg_dict: dict,
@@ -298,29 +461,42 @@ def evaluate_fitness_local(
     candidate_id: int,
     generation: int,
     sanity_n_per_opponent: int = 10,
-    fitness_n_per_opponent: int = 69,
+    fitness_n_per_opponent: int = 33,
     sanity_threshold: float = 0.91,
     archive_opponents: list[dict] | None = None,
 ) -> dict:
-    """Run sanity gate, then fitness games for one candidate. Pure Python; no Modal.
+    """Run sanity gate (2P), then 4P fitness games for one candidate. Pure Python; no Modal.
 
-    `archive_opponents`, when provided, is a list of dicts each with keys
-    {"name": str, "cfg_dict": dict}. These represent past best configs used
-    for rolling-archive co-evolution. The candidate plays against:
-        - the FITNESS_ANCHOR (v15g_stock) at weight ANCHOR_WEIGHT
-        - each archive entry, sharing ARCHIVE_WEIGHT_TOTAL equally
-    When `archive_opponents` is None or empty, falls back to anchor-only
-    fitness with weight 1.0 (backward-compat with iteration v2 behavior).
+    Plan A 4P retool (kickoff brief 2026-05-05): the fitness phase is now
+    4P FFA games using graduated placement scoring (rank → [+1, +1/3,
+    -1/3, -1] with tie-averaging). Each game pairs the candidate (player 0)
+    with 3 opponents drawn from `archive_opponents` via `_select_4p_opponents`
+    (falls back to "starter" when archive has fewer than 3 entries).
 
-    Reseeds Python's global random state once at entry so games are reproducible
-    across containers (each container is its own fresh process, so this gives
-    every candidate identical RNG consumption per generation).
+    Sanity gate stays 2P — it just checks the candidate is coherent enough
+    to play. SANITY_OPPONENTS, sanity_n_per_opponent, and sanity_threshold
+    semantics unchanged. Sanity-fail returns DISQUALIFIED_FITNESS as before.
+
+    `fitness_n_per_opponent`: keeping the parameter name for backward compat
+    with the Modal `evaluate_fitness` wrapper, but in 4P mode this is the
+    number of 4P GAMES per candidate (kickoff brief: N=33).
+
+    `archive_opponents`: same shape as before — list of dicts with keys
+    {"name": str, "cfg_dict": dict}. None or empty → all-starter opponents.
+
+    Reseeds Python's global random state once at entry so games are
+    reproducible across containers (each container is its own fresh
+    process, so this gives every candidate identical RNG consumption per
+    generation).
+
+    Returns `per_opp = {"4p_graduated": mean_score}`. The single-key shape
+    keeps downstream report writers happy (they iterate per_opp.items()).
     """
     random.seed(GLOBAL_TUNER_SEED)
     started = time.time()
     archive_opponents = archive_opponents or []
 
-    # ----- Sanity gate -----
+    # ----- Sanity gate (2P, unchanged) -----
     sanity_winrates: dict[str, float] = {}
     sanity_pass = True
     for opp in SANITY_OPPONENTS:
@@ -330,56 +506,36 @@ def evaluate_fitness_local(
         sanity_winrates[opp] = wr
         if wr < sanity_threshold:
             sanity_pass = False
-            # Early exit: don't run remaining sanity opponents OR fitness phase
-            break
+            break  # early exit, skip remaining sanity opps + fitness phase
 
     if not sanity_pass:
-        empty_per_opp = {FITNESS_ANCHOR: 0.0}
-        for arch in archive_opponents:
-            empty_per_opp[arch["name"]] = 0.0
         return {
             "candidate_id": candidate_id,
             "generation": generation,
             "sanity_pass": False,
             "fitness": DISQUALIFIED_FITNESS,
-            "per_opp": empty_per_opp,
+            "per_opp": {"4p_graduated": 0.0},
             "sanity_winrates": sanity_winrates,
             "wall_clock_seconds": time.time() - started,
         }
 
-    # ----- Fitness phase: anchor + (optional) archive -----
-    per_opp: dict[str, float] = {}
+    # ----- Fitness phase: N 4P FFA games -----
+    candidate_scores: list[float] = []
+    for game_idx in range(fitness_n_per_opponent):
+        opponents = _select_4p_opponents(archive_opponents, num_needed=3)
+        # Game seed = game_idx so every candidate sees the same env seeds
+        # (fair comparison within the generation).
+        scores = run_one_game_4p(cfg_dict, opponents, seed=game_idx)
+        candidate_scores.append(scores[0])  # candidate is at position 0
 
-    # Anchor (always present)
-    anchor_margins = [run_one_game(cfg_dict, FITNESS_ANCHOR, seed=s)
-                      for s in range(fitness_n_per_opponent)]
-    per_opp[FITNESS_ANCHOR] = sum(anchor_margins) / len(anchor_margins)
-
-    # Archive entries (config-vs-config matchups)
-    for arch in archive_opponents:
-        margins = [run_one_game_vs_config(cfg_dict, arch["cfg_dict"], seed=s)
-                   for s in range(fitness_n_per_opponent)]
-        per_opp[arch["name"]] = sum(margins) / len(margins)
-
-    # Compute weighted fitness
-    if archive_opponents:
-        anchor_w = ANCHOR_WEIGHT
-        archive_w_each = ARCHIVE_WEIGHT_TOTAL / len(archive_opponents)
-    else:
-        # No archive yet → anchor takes full weight
-        anchor_w = 1.0
-        archive_w_each = 0.0
-
-    fitness = anchor_w * per_opp[FITNESS_ANCHOR]
-    for arch in archive_opponents:
-        fitness += archive_w_each * per_opp[arch["name"]]
+    fitness = sum(candidate_scores) / len(candidate_scores)
 
     return {
         "candidate_id": candidate_id,
         "generation": generation,
         "sanity_pass": True,
         "fitness": float(fitness),
-        "per_opp": per_opp,
+        "per_opp": {"4p_graduated": float(fitness)},
         "sanity_winrates": sanity_winrates,
         "wall_clock_seconds": time.time() - started,
     }
@@ -396,11 +552,17 @@ def evaluate_fitness_local(
 # These meter-based numbers run ~4-5x HIGHER than actual Modal billing per the
 # user's dashboard — so divide by 4-5 for real $$$.
 PROFILES: dict[str, tuple[int, int, int, float]] = {
-    "smoke":       (4,   1,  4,   0.10),
-    "iteration":   (20,  15, 30,  25.0),
-    "default":     (50,  15, 69,  130.0),
-    "extended":    (50,  30, 69,  300.0),
-    "max-quality": (100, 30, 100, 850.0),
+    # popsize, generations, fitness_n_per_opponent (= 4P games per eval), est_cost_usd
+    # 4P retool 2026-05-05: kickoff brief recommends N=33 games per eval.
+    # 4P games are ~4× the agent-call work of 2P, so per-evaluation wall-clock
+    # is roughly 33*4 / 69*1 ≈ 2× the old 2P default. Cost estimates bumped
+    # accordingly. Modal cost-meter overestimates 4-5× per memory; defer to
+    # the user's billing dashboard for actual $$.
+    "smoke":       (4,   1,  4,   0.20),
+    "iteration":   (20,  15, 33,  50.0),
+    "default":     (50,  15, 33,  130.0),
+    "extended":    (50,  30, 33,  260.0),
+    "max-quality": (100, 30, 33,  500.0),
 }
 
 
