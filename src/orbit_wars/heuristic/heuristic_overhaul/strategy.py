@@ -10,9 +10,9 @@ from typing import Any
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from ..geometry import dist, is_static_planet, safe_angle_and_distance
-from ..state import ObservationView, Planet
-from ..world import WorldModel, aim_with_prediction, estimate_fleet_eta, path_collision_predicted
+from orbit_wars.geometry import dist, is_static_planet, safe_angle_and_distance
+from orbit_wars.state import ObservationView, Planet
+from orbit_wars.world import WorldModel, aim_with_prediction, estimate_fleet_eta, path_collision_predicted
 from .config import HeuristicConfig
 
 __all__ = ["LaunchDecision", "Threat", "agent", "decide_with_decisions"]

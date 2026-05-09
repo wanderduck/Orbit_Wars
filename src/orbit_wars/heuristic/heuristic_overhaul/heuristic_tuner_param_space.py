@@ -7,7 +7,7 @@ CMA-ES optimizer can organically explore wild tactics without hitting false ceil
 from __future__ import annotations
 from dataclasses import fields
 import numpy as np
-from orbit_wars.heuristic.config import HeuristicConfig
+from orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig
 
 __all__ = ["PARAM_SPACE", "NUMERIC_FIELDS", "INT_DIM_INDICES", "encode", "decode", "validate_param_space"]
 

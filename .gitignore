@@ -34,3 +34,6 @@ notebooks/episodes_*.json
 
 #blog
 /docs/blog
+
+#data
+data/

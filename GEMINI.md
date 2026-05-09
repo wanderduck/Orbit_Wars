@@ -1,0 +1,126 @@
+# GEMINI.md
+
+This file provides guidance to Gemini when working with code in this repository.
+
+## Project context
+
+Single-developer Kaggle competition entry for **Orbit Wars** (https://www.kaggle.com/competitions/orbit-wars), a real-time-strategy simulation tournament. Final submission deadline: **2026-06-23**. There is no production system — every change is in service of producing a stronger `agent(obs)` function for the leaderboard.
+
+Authoritative game rules and observation schema live in `docs/competition_documentation/Orbit_Wars-game_and_agents_overviews.md` and `Orbit_Wars-competition_overview_and_rules.md`. **Read these before changing agent logic** — the rules are sharp-edged (sun collisions destroy fleets, comets share IDs with planets, fleet speed is a logarithmic function of fleet size, combat resolves via "largest vs. second-largest" survivors).
+
+**Current strategic plan (2026-05-05):** We have executed a major architectural pivot. The legacy MCTS and CPU-only heuristic have been replaced by a Neural Network-guided MCTS (`src/orbit_wars/mcts/mcts_overhaul/`).
+- **Phase 1-3 (Modal Cloud):** We use Modal GPUs to bootstrap self-play games (`bootstrap.py`) and train a lightweight PyTorch MLP (`train.py`). The model predicts state value (Win/Loss) and dense policy tokens (action probabilities). The model is saved to a persistent Modal Volume and exported as an `mcts_net.onnx` file.
+- **Phase 4 (Kaggle Inference):** The agent runs pure CPU-inference using `onnxruntime`. The PUCT search expands only the top $K$ most promising tokens predicted by the Neural Network, massively increasing search efficiency within Kaggle's 1-second time limit.
+
+**Env upgrade (2026-05-06):** `kaggle-environments` is now pinned to `git+master` (commit 6458c31), not pypi. Pypi 1.29.0 is interim; Kaggle ladder servers run master with continuous swept-pair collision detection. Local diagnostics, A/B tests, CMA-ES tuner, and the MCTS forward model now all align with what Kaggle scores against. Iteration log: `docs/iteration_logs/2026-05-06-env-upgrade-master.md`.
+
+## Toolchain
+
+- **Package manager: `uv`** (uv.lock is committed). Do not `pip install` into the venv.
+- Python **3.13** pinned in `pyproject.toml`.
+- The pyproject pulls **CUDA 13.0 wheels** (`pytorch-cu130` index, RAPIDS `*-cu12==26.2.*`, `tensorflow[and-cuda]`). Heavy CUDA stack — expect slow first-time `uv sync`.
+- We use **Modal** for heavy compute. All heavy scripts (bootstrap, training, heuristic tuning) are designed to run in `--detach` mode in the cloud using `modal.Volume` persistence.
+- `.envrc` prepends NVIDIA `cudnn/lib` and `tensorrt` to `LD_LIBRARY_PATH`. Run `direnv allow` once after cloning, otherwise TF/Torch may not find CUDA libs.
+
+## Commands
+
+```bash
+# Install / refresh dependencies
+uv sync
+
+# Run anything inside the project venv
+uv run python -c "import torch; print(torch.cuda.is_available())"
+
+# --- MCTS NN Overhaul Workflow (Modal) ---
+# 1. Generate Data (Detached)
+modal run --detach src/orbit_wars/mcts/mcts_overhaul/bootstrap.py --num-games 5000
+# 2. Train Model (Detached)
+modal run --detach src/orbit_wars/mcts/mcts_overhaul/train.py --epochs 30
+# 3. Download ONNX Model
+modal volume get orbit-wars-vol /data/models/mcts_net.onnx ./models/
+
+# --- Kaggle Submission ---
+# Pack and submit the new NN MCTS architecture 
+uv run python src/tools/submit_overhaul.py -m "MCTS NN Prior v1"
+```
+
+Run tests: `uv run pytest -q` (37 tests; geometry/rotation/world combat resolution; uses `hypothesis` for property tests). Mark slow tests with `@pytest.mark.slow` and run via `-m slow`. Lint: `uv run ruff check src tests`. Type-check: `uv run ty check src` (config in `pyproject.toml`).
+
+The Typer CLI: `uv run orbit-play {play,ladder,replay,pack,train,eval} --help`. `pack` produces a submission tarball with a G4 smoke test built in.
+
+## Submission packaging — important
+
+Kaggle requires **`main.py` at the bundle root**. The legacy agent lives at `src/main.py`, but the new NN Overhaul uses a custom packager.
+
+To bundle the new MCTS Neural Network agent, use `src/tools/submit_overhaul.py`. It automatically:
+1. Generates a custom `main.py` entrypoint.
+2. Bundles the `models/` directory so Kaggle's offline servers can access `mcts_net.onnx`.
+3. Runs a smoke test.
+4. Uploads to Kaggle.
+
+**Per competition rules (Section 12):** the agent must not perform network I/O during episode evaluation.
+
+## Agent architecture
+
+The submission entry point is `agent(obs, config=None)`. It is **stateless** by contract — Kaggle calls it once per turn with up to 1 second wall-clock (`actTimeout=1`). 
+
+**The new MCTS Overhaul (`mcts_overhaul/agent.py`) logic:**
+- **Lazy ONNX Loading:** To avoid cold-start timeouts on turn 1, `onnxruntime.InferenceSession` is lazy-loaded globally and configured for extreme CPU efficiency (single-threaded intra/inter op).
+- **Graceful Fallback:** If the `models/mcts_net.onnx` file is missing, the model fails to load, or the remaining turn time drops below `fallback_threshold_ms` (50ms), the agent safely delegates control to the updated baseline heuristic.
+- **Dense Token Space:** The `ObservationView` is flattened into a 541-dim array. The PyTorch policy head maps to a dense continuous array of 14,401 indices which `dense_token.py` safely translates back into action `LaunchTokens` to advance the simulator state.
+
+Critical observation/action quirks:
+
+- **`obs` may be a dict OR a Struct.** Use `ObservationView.from_raw(obs)` (in `orbit_wars.state`) or the dual-mode pattern. Preserve in new code.
+- **`agent(obs, config=None)` signature trap.** `kaggle_environments.env.run` passes its env-config Struct as the second positional arg. If you write `cfg = config or DEFAULT`, the truthy Struct overrides DEFAULT and `cfg.<attr>` raises AttributeError, gets caught by the boundary `try/except`, and the agent returns `[]` every turn for the entire episode — silently. **Always guard with `isinstance(config, HeuristicConfig)`.** This bug cost hours in v1.0; never repeat it.
+- **Comets are aliased into `obs.planets`.** Filter with `obs.comet_planet_ids` when iterating "real" planets. Comets vanish when they leave the board (taking garrisoned ships with them) — `aim_with_prediction` caps ETA at `len(comet_path) - comet_path_index`; if you bypass the helper, replicate the cap.
+- **`obs.step` is populated by the env** (1-indexed turn). Don't build a module-level counter cache to track step number — the cache pollutes when post-hoc diagnostic re-walks env.steps with `decide_with_decisions`. `ObservationView.from_raw` reads it; just use `view.step`.
+- **Planet rotation: rotate from CURRENT position, not `initial_planets`.** At step N obs, the planet has undergone (N−1) rotations from initial. Agents don't know N. `predict_planet_position(target_now, ang_vel, ETA)` is correct; `predict_planet_position(initial, ang_vel, ETA)` is off by N−1 (constant ~1-unit drift per game). Was an off-by-N bug in v1.2.
+- **Fleets collide with ANY planet on the path, not just sun and target.** Per E1 / E3: "Collides with any planet (path segment comes within the planet's radius). This triggers combat." Use `path_collision_predicted` in `orbit_wars.world` — walks the trajectory turn-by-turn, predicts each non-target planet's position, returns the first interceptor or None. Note: env master (commit 6458c31) uses **continuous swept-pair collision** — both fleet AND planet positions are integrated over the tick, and any time they come within `planet.radius` of each other in [0,1] is a hit. Sweep is no longer a separate phase — it's folded into fleet movement. Our `path_collision_predicted` uses simpler point-to-segment math which is a strategy approximation; for env-faithful prediction use `swept_pair_hit` in `orbit_wars.geometry` or the simulator's Phase 4 directly.
+- **Fleet speed scales with fleet size** (`speed = 1 + (max-1) * (log(ships)/log(1000))^1.5`). Splitting a large fleet into many tiny fleets dramatically slows them down. Splitting also costs path-clearance verifications per fleet.
+- The named tuples `Planet`, `Fleet`, plus `CENTER` and `ROTATION_RADIUS_LIMIT` are exported from `kaggle_environments.envs.orbit_wars.orbit_wars`.
+- **Built-in `starter` opponent only attacks STATIC planets** (`orbital_r + p.radius >= ROTATION_RADIUS_LIMIT`), aim-at-current-position, sends `mp.ships // 2`. No defense, no aim correction. Source: `.venv/lib/python3.13/site-packages/kaggle_environments/envs/orbit_wars/orbit_wars.py:773`. Useful baseline; ~95% v1.5 win rate on 100 seeds — does NOT differentiate Hungarian vs greedy.
+
+The current agent (v1.5G) is a nearest-target sniper plus defense, with WorldModel-backed sizing, intercept aim for orbiting/comet targets, path-clearance, late-game launch filter (skip launches whose ETA exceeds `EPISODE_STEPS - obs.step`), and a `HeuristicConfig` dataclass for tuning. Offense planner is toggleable via `use_hungarian_offense` (default `False` — greedy = v1.4 semantics; `True` = scipy linear_sum_assignment one-to-one matching). Defense is enabled by default (`reinforce_enabled=True`): `find_threats` walks `WorldModel.base_timeline` for forecast ownership flips, `plan_defense` reserves ships from the nearest viable source. Local performance: 100% vs all current sparring partners (20 seeds × 5 opponents). Kaggle ladder: v1.4 settled at ~700 μ; v1.5 (Hungarian + defense) early readings ~600-655 μ; **v1.5G (greedy + defense) is high-variance with recent submissions spanning roughly 650-800 μ — treat ~700 μ as the working median with a ~100 μ noise band per submission.** An earlier reading of ~800 μ that briefly suggested clear improvement has since drifted back down to the ~650-700 range; either the early high was variance / favourable matchmaking, or competition is genuinely strengthening (or both). Per-submission ladder noise is a major factor in any A/B comparison at this μ level.
+
+## Known gaps / be critical
+
+- **README.md is a placeholder** — don't treat it as documentation.
+- **Local opponent pool is fully saturated against default.** Spot-check (n=100/cell, 2026-05-03) confirmed: aggressive_swarm 100%, defensive_turtle 100%, competent_sniper 100%, peer_mdmahfuzsumon 96%, starter 94%. Only asymmetric self-play (tuned-cfg vs default-cfg) provides differentiating signal — but Phase 3 BEST_v2 with +1.12 local margin → 663.7 μ on ladder, so even self-play isn't a reliable predictor. Ground truth for ranking changes lives only on the Kaggle ladder; budget submission slots accordingly (≈3/day).
+- **Kaggle ladder μ updates over time.** Initial readings after submission drift ±50 μ over hours as more episodes run. BEST_v2 read 614 μ at first check → 663.7 μ ~12 hours later. Wait at least 4-6 hours before drawing conclusions; compare against same-day-old reference submissions, not week-old.
+- **Hungarian vs greedy offense — still unresolved within noise band.** v1.5G (greedy + defense) recent readings span ~650-800 μ; v1.5 (Hungarian + defense) prior readings were ~600-655 μ. With v1.5G's ~100 μ per-submission swing, the apparent gap collapses into the noise floor — the A/B is not actually decided. `use_hungarian_offense=False` remains the working default for v1.5G but should NOT be treated as proven superior. A future controlled re-test (multiple submissions of each variant) would be needed to resolve.
+- **No 4-player FFA-aware logic AND tuner trains 2P only.** Kaggle ladder is 4P FFA; `modal_tuner.py: run_one_game` uses `env.run([me, opp])` (2 agents → 2P mode). Spot-check `docs/research_documents/spot_checks/2026-05-05T04-11-41Z/` showed 2P rankings DIVERGE from 4P rankings: bestv2 best in 2P (64% wr) but worst in 4P (20%). 4P win-rate tracks ladder μ better than 2P margin (n=2: bestv3 wins both). 4P env reward is binary (+1 winner, -1 all others — no graduated placement; ladder Elo provides the only finer signal). **2026-05-05: 4P retool of `modal_tuner.py` designed and planned** — graduated placement fitness ([1st=+1, 2nd=+1/3, 3rd=−1/3, 4th=−1] computed from final ship totals via new `compute_player_assets`), N=33 4P games per eval, 3-archive opponents with `starter` fallback. See `docs/research_documents/2026-05-05-plan-a-tuner-4p-retool.md`. NOT yet executed.
+- **No multi-source coordination.** Each owned planet picks a target independently; no swarm mission (E6 pattern).
+- **`uv.lock` pins large CUDA/RAPIDS stack** — `uv sync` is slow (~minutes). The agent itself doesn't need GPU; it's there for the v2+ RL scaffold (currently stubs in `src/orbit_wars/rl/`).
+- **Env consumes Python's global random state — cross-script A/B comparisons are INVALID.** Same `configuration={'seed': N}` produces *different* game outcomes depending on what position-in-stream the game runs at, because env internals consume from `random` between turns. Phase 2 Step 4 surfaced this concretely: the same `HeuristicConfig.default()` got 98% in a 2-variant script and 93% in a 4-variant script vs the same opponent on the same env seeds. **Within-script comparisons remain valid** (matched random-stream positions). For any future A/B: run all variants in the same script, alternating per seed. Don't compare winrates across separately-launched scripts.
+- **2-variant gates can be misleading; prefer multi-variant ablation.** Step 4's 2-variant gate said "passes" (98% vs 98%, Δ=0). The 4-variant ablation revealed the bundle's pincer toggle was -5% standalone — hidden because the 2-variant comparison happened to show two configs that were equally bad in different ways. When investigating a bundle of N changes, run N+1-variant ablation (control + each toggle individually).
+
+## Diagnostics & debugging
+
+When the agent loses or behaves unexpectedly, **diagnose before fixing**. The tools that exist:
+
+- `uv run python -m tools.diagnostic --seeds 0,1,2,3,4 --out docs/iteration_logs/<v>/diag.json` — instruments the agent, logs every launch with target/ships/eta, then walks env.steps to resolve outcome (`captured`, `still-neutral-at-arrival`, `fleet-destroyed-in-transit`, `enemy-defended`, `arrival-after-episode-end`, etc). Outputs JSON + Markdown summary tables. **Caveat:** `arrival-after-episode-end` means "arrived after the actual episode ended" (often early termination on a win, not turn 500), not "arrived after turn 500". Most short games will report this for late-game launches even if the launch was correct.
+- `uv run python -m tools.trace_launch --seed 0 --target-type {static,orbiting,comet}` — picks specific launches and walks env.steps to find the fleet's actual trajectory and where it disappeared. Useful for verifying hypotheses before coding fixes.
+- `uv run python -m tools.spot_check_4p --games-2p 50 --games-4p 50 --workers 5` — round-robin tournament of {default, bestv2-v4_test} in BOTH 2P and 4P modes, multiprocessing across CPUs (use `--workers 5` on thermal-limited laptops; default is `cpu_count - 1`). Outputs `docs/research_documents/spot_checks/<UTC-ISO>/{tournament.json, summary.md}`. Used to diagnose train/test gap.
+- For reproducible tournaments, set `random.seed(42)` ONCE before the seed loop. `random_agent` and env internals consume Python's global random state; per-seed reseeding gives different results than running 10 seeds straight. (env's own seed via `configuration={'seed': N}` is independent.)
+- **kaggle_environments quirk**: `env.run` calls agent functions via `inspect.signature` — closures with `*args, **kwargs` get called with NO args because the inspector sees 0 required params. Always use a real function with explicit `obs` parameter.
+- **Env source:** `.venv/lib/python3.13/site-packages/kaggle_environments/envs/orbit_wars/orbit_wars.py`. Primary reference for any env-quirk question (combat math, phase order, collision thresholds, comet RNG). Spec at sibling `orbit_wars.json` (`agents: [2, 4]`, `episodeSteps: 500`, `actTimeout: 1`).
+
+## Workflow gotchas (single-developer + parallel tooling)
+
+- **`git commit` commits the staged INDEX, not just files you named.** `git add <specific files>` followed by `git commit -m "..."` will sweep in anything the user (or another tool) had pre-staged. Multiple Phase 1/2 commits silently included GitHub Desktop's pending stage. **Always run `git status -s` immediately before `git commit`**; if the index has unexpected files, `git reset HEAD <file>` to unstage them, then commit. Never use `git add -A` / `git add .` — name files explicitly.
+- **User runs GitHub Desktop in parallel.** Branch state, working-tree state, and stage contents can shift between turns without any prompt from the user. After any pause (skill invocations, long agent runs, usage-limit reset), re-check `git branch --show-current && git status -s` before assuming the world matches your last view. Don't blindly continue a multi-step git operation across pause boundaries.
+- **Subagents read reliably, write inconsistently.** `general-purpose` and `python3-development:codebase-analyzer` agents can Read project files fine, but Writing to nested project paths (especially `docs/research_documents/...`) has failed silently multiple times — they create doubled paths, write to `/tmp/`, or return success without the file actually appearing. Pattern that works: have subagents return findings INLINE in their reply text; the parent agent (this one) does all Write/Edit calls. Confirms with file_path:line_number after writing.
+- **Modal CLI gotcha:** `uv run modal token info` to verify auth (NOT `modal token current` — doesn't exist).
+- **CMA-ES rolling-archive design rule.** Save robust-BEST = best-from-max-archive-size-seen generation, NOT best-ever-fitness. Best-ever is biased toward early/warmup gens with smaller archives (easier fitness landscape). The optimization (CMA-ES `tell()`) uses gen-specific fitness regardless; only the saved artifact differs. Already implemented in `src/tools/modal_tuner.py`; document here so it's not "fixed" the wrong way later.
+- **Modal sweeps must use `evaluate_fitness.starmap(args, return_exceptions=True)`.** Bare starmap propagates any per-input failure (FunctionTimeoutError on preemption-restart, OOM, etc.) up through the local driver and stops the entire sweep. Map returned exceptions to `DISQUALIFIED_FITNESS` so CMA-ES treats them as bad candidates and continues. 120-min function timeout is the working value (was 30, killed by preemption-restart in 2026-05-03 sweep). Already implemented; don't regress.
+- **`GEMINI.md` may appear untracked in `git status`.** It's the Gemini CLI's analogue of `CLAUDE.md` (a separate AI tool's memory file). Not committed; don't stage, read, or modify it.
+
+## Repo layout (non-obvious bits)
+
+- `src/main.py` — the agent. This is the file that ships.
+- `src/orbit_wars/opponents/` — local sparring partners (`competent_sniper`, `aggressive_swarm`, `defensive_turtle`). All currently beaten 100% by our agent. NOT shipped — for `orbit-play ladder` only.
+- `docs/competition_documentation/` — game rules, agent guide, important links. Source of truth for game semantics.
+- `images/` — referenced from docs/notebooks; not part of submissions.
+- `.cadence/configs/` — empty; reserved (purpose not yet established in this repo).
+- `src/orbit_wars/sim/` — MCTS forward-model package. **Past Day-1 (2026-05-05):** `state.py`, `action.py` (with `validate_move`), `validator.py` (with `extract_state_and_actions` + `inject_state_and_step` round-trip + tests) are built. `Simulator.step` phases + `validator.validate` queued — see `docs/research_documents/2026-05-05-plan-c-day-3-5-minimal-sim.md`. Master design (Day 14 ≥99% gate decides MCTS continuation): `docs/research_documents/mcts_forward_model_design.md`.

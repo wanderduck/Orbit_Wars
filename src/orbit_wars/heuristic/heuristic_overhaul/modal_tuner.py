@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tools.heuristic_tuner_param_space import (
+from orbit_wars.heuristic.heuristic_overhaul.heuristic_tuner_param_space import (
 	INT_DIM_INDICES, NUMERIC_FIELDS, PARAM_SPACE, decode, encode, validate_param_space,
 	)
 
@@ -33,7 +33,7 @@ OPPONENT_REGISTRY: dict[str, str] = {
 	"aggressive_swarm": "orbit_wars.opponents.aggressive_swarm:agent",
 	"defensive_turtle": "orbit_wars.opponents.defensive_turtle:agent",
 	"peer_mdmahfuzsumon": "orbit_wars.opponents.peer_mdmahfuzsumon:agent",
-	"v15g_stock": "orbit_wars.heuristic.strategy:agent",
+	"v15g_stock": "orbit_wars.heuristic.heuristic_overhaul.strategy:agent",
 	}
 
 
@@ -47,8 +47,8 @@ def _resolve_opponent(name: str):
 
 
 def make_configured_agent(cfg_dict: dict):
-	from orbit_wars.heuristic.config import HeuristicConfig
-	from orbit_wars.heuristic.strategy import agent as agent_strategy
+	from orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig
+	from orbit_wars.heuristic.heuristic_overhaul.strategy import agent as agent_strategy
 	cfg = HeuristicConfig(**cfg_dict)
 
 	def configured_agent(obs):
@@ -158,7 +158,7 @@ def evaluate_fitness_local(
 		cfg_dict: dict, candidate_id: int, generation: int, sanity_n_per_opponent: int = 10,
 		fitness_n_per_opponent: int = 33, sanity_threshold: float = 0.91, archive_opponents: list[dict] | None = None,
 		) -> dict:
-	from orbit_wars.heuristic.config import HeuristicConfig
+	from orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig
 
 	random.seed(GLOBAL_TUNER_SEED + generation * 1000 + candidate_id)
 	started = time.time()
@@ -221,7 +221,7 @@ def _write_best_config_py(path: Path, cfg_dict: dict, run_id: str, fitness: floa
 	per_opp_str = ", ".join(f"{k}={v:+.4f}" for k, v in per_opp.items())
 	field_lines = ",\n    ".join(f"{k}={v!r}" for k, v in sorted(cfg_dict.items()))
 	path.write_text(
-		f'"""Best config from CMA-ES run {run_id}.\n\nBest fitness: {fitness:+.4f}\nPer-opponent: {per_opp_str}\n"""\n\nfrom orbit_wars.heuristic.config import HeuristicConfig\n\nBEST = HeuristicConfig(\n    {field_lines},\n)\n')
+		f'"""Best config from CMA-ES run {run_id}.\n\nBest fitness: {fitness:+.4f}\nPer-opponent: {per_opp_str}\n"""\n\nfrom orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig\n\nBEST = HeuristicConfig(\n    {field_lines},\n)\n')
 
 
 def _write_final_report(
@@ -241,7 +241,7 @@ PROFILES: dict[str, tuple[int, int, int, float]] = {
 	"smoke": (4, 1, 4, 0.20),
 	"iteration": (20, 15, 33, 50.0),
 	"default": (50, 15, 33, 130.0),
-	"extended": (77, 42, 69, 260.0),
+	"extended": (88, 69, 69, 260.0),
 	"max-quality": (100, 30, 33, 500.0),
 	}
 
@@ -311,7 +311,7 @@ def main(
 	out_dir = Path(output_root) / run_id
 	out_dir.mkdir(parents=True, exist_ok=True)
 
-	from orbit_wars.heuristic.config import HeuristicConfig
+	from orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig
 	lowers = np.array([PARAM_SPACE[n][0] for n in NUMERIC_FIELDS], dtype=np.float64)
 	uppers = np.array([PARAM_SPACE[n][1] for n in NUMERIC_FIELDS], dtype=np.float64)
 	x0_real = encode(HeuristicConfig.default())
