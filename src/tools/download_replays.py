@@ -140,9 +140,14 @@ def main() -> int:
     episodes = list_episodes(args.sub_id)
     print(f"Found {len(episodes)} episodes for this submission")
 
+    # Reverse the list so we start at the last episode and work our way backwards
+    episodes.reverse()
+
     if args.count < len(episodes):
         episodes = episodes[: args.count]
-        print(f"Downloading first {args.count}")
+        print(f"Downloading last {args.count} episodes (descending)")
+    else:
+        print(f"Downloading all {len(episodes)} episodes (descending)")
 
     downloaded = 0
     skipped = 0

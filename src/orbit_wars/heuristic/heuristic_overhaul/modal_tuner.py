@@ -20,7 +20,7 @@ import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-
+import multiprocessing
 import numpy as np
 
 from orbit_wars.heuristic.heuristic_overhaul.heuristic_tuner_param_space import (
@@ -34,6 +34,7 @@ OPPONENT_REGISTRY: dict[str, str] = {
 	"defensive_turtle": "orbit_wars.opponents.defensive_turtle:agent",
 	"peer_mdmahfuzsumon": "orbit_wars.opponents.peer_mdmahfuzsumon:agent",
 	"v15g_stock": "orbit_wars.heuristic.heuristic_overhaul.strategy:agent",
+	"bestv6_overhaul": "orbit_wars.opponents.bestv6_overhaul:agent",
 	}
 
 
@@ -154,62 +155,100 @@ def _run_one_game_4p_wrapper(cfg_dict, archive_opponents, default_cfg, game_idx,
 	return run_one_game_4p(cfg_dict, opponents, seed=game_idx)
 
 
+import multiprocessing
+
+
 def evaluate_fitness_local(
-		cfg_dict: dict, candidate_id: int, generation: int, sanity_n_per_opponent: int = 10,
-		fitness_n_per_opponent: int = 33, sanity_threshold: float = 0.91, archive_opponents: list[dict] | None = None,
+		cfg_dict: dict, candidate_id: int, generation: int,
+		sanity_n_per_opponent: int = 10, fitness_n_per_opponent: int = 33,
+		sanity_threshold: float = 0.91, archive_opponents: list[dict] | None = None,
 		) -> dict:
 	from orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig
-
 	random.seed(GLOBAL_TUNER_SEED + generation * 1000 + candidate_id)
 	started = time.time()
 	archive_opponents = archive_opponents or []
 	default_cfg = asdict(HeuristicConfig.default())
 
-	# ----- Sanity gate -----
-	sanity_winrates: dict[str, float] = {}
+	ctx = multiprocessing.get_context("spawn")
+
+	sanity_winrates: dict[str, float] = {opp: 0.0 for opp in SANITY_OPPONENTS}
 	sanity_pass = True
 
-	with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
+	with concurrent.futures.ProcessPoolExecutor(max_workers=12, mp_context=ctx) as executor:
+
+		future_to_opp = {}
 		for opp in SANITY_OPPONENTS:
-			futures = [executor.submit(_run_one_game_wrapper, cfg_dict, opp, s) for s in range(sanity_n_per_opponent)]
-			margins = []
-			for f in concurrent.futures.as_completed(futures):
-				margins.append(f.result())
-			wr = _winrate(margins)
-			sanity_winrates[opp] = wr
-			if wr < sanity_threshold:
-				sanity_pass = False
-				break
+			for s in range(sanity_n_per_opponent):
+				future_to_opp[executor.submit(_run_one_game_wrapper, cfg_dict, opp, s)] = opp
 
-	if not sanity_pass:
-		return {
-			"candidate_id": candidate_id, "generation": generation, "sanity_pass": False,
-			"fitness": DISQUALIFIED_FITNESS, "per_opp": {"4p_graduated": 0.0},
-			"sanity_winrates": sanity_winrates, "wall_clock_seconds": time.time() - started,
-			}
+		margins_by_opp = {opp: [] for opp in SANITY_OPPONENTS}
+		losses_by_opp = {opp: 0 for opp in SANITY_OPPONENTS}
 
-	# ----- Fitness phase: Parallel Multiprocessing + Successive Halving Early Stops -----
-	candidate_scores: list[float] = []
+		for f in concurrent.futures.as_completed(future_to_opp):
+			opp = future_to_opp[f]
+			try:
+				margin = f.result()
+			except Exception:
+				margin = -1.0
 
-	with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
+			margins_by_opp[opp].append(margin)
+
+			if margin <= 0:
+				losses_by_opp[opp] += 1
+				max_possible_wins = sanity_n_per_opponent - losses_by_opp[opp]
+				if (max_possible_wins / sanity_n_per_opponent) < (sanity_threshold - 1e-9):
+					sanity_pass = False
+					break
+
+		for opp in SANITY_OPPONENTS:
+			sanity_winrates[opp] = _winrate(margins_by_opp[opp]) if margins_by_opp[opp] else 0.0
+
+		if not sanity_pass:
+			for fut in future_to_opp:
+				fut.cancel()
+			for p in executor._processes.values():
+				p.terminate()
+			return {
+				"candidate_id": candidate_id, "generation": generation, "sanity_pass": False,
+				"fitness": DISQUALIFIED_FITNESS, "per_opp": {"4p_graduated": 0.0},
+				"sanity_winrates": sanity_winrates, "wall_clock_seconds": time.time() - started,
+				}
+
+		candidate_scores: list[float] = []
 		futures = []
 		for game_idx in range(fitness_n_per_opponent):
-			futures.append(executor.submit(_run_one_game_4p_wrapper, cfg_dict, archive_opponents, default_cfg, game_idx,
-			                               GLOBAL_TUNER_SEED + generation * 100 + candidate_id))
+			futures.append(executor.submit(
+				_run_one_game_4p_wrapper, cfg_dict, archive_opponents, default_cfg, game_idx,
+				GLOBAL_TUNER_SEED + generation * 100 + candidate_id
+				))
 
 		for i, f in enumerate(concurrent.futures.as_completed(futures)):
-			scores = f.result()
-			candidate_scores.append(scores[0])
+			try:
+				scores = f.result()
+				candidate_scores.append(scores[0])
+			except Exception as e:
+				# FIX: Print the worker crash reason so it isn't swallowed!
+				import sys
+				print(f"Worker Exception: {e}", file=sys.stderr)
+				candidate_scores.append(-1.0)
+			completed = i + 1
 
-			# Mathematical Early Stopping (Save massive Cloud Compute Costs)
-			if i == 10 and sum(candidate_scores) / len(candidate_scores) < -0.4:
+			mean_score = sum(candidate_scores) / completed
+			early_stop = False
+			if completed >= 5 and mean_score < -0.8:
+				early_stop = True
+			elif completed >= 10 and mean_score < -0.4:
+				early_stop = True
+
+			if early_stop:
 				for fut in futures:
 					fut.cancel()
+				for p in executor._processes.values():
+					p.terminate()
 				candidate_scores.extend([-1.0] * (fitness_n_per_opponent - len(candidate_scores)))
 				break
 
 	fitness = sum(candidate_scores) / len(candidate_scores)
-
 	return {
 		"candidate_id": candidate_id, "generation": generation, "sanity_pass": True,
 		"fitness": float(fitness), "per_opp": {"4p_graduated": float(fitness)},
@@ -241,7 +280,7 @@ PROFILES: dict[str, tuple[int, int, int, float]] = {
 	"smoke": (4, 1, 4, 0.20),
 	"iteration": (20, 15, 33, 50.0),
 	"default": (50, 15, 33, 130.0),
-	"extended": (88, 69, 69, 260.0),
+	"extended": (92, 33, 42, 260.0),
 	"max-quality": (100, 30, 33, 500.0),
 	}
 
@@ -276,13 +315,13 @@ MINUTES = 60
 tuner_image = (
 	modal.Image.debian_slim(python_version="3.13")
 	.uv_pip_install("cma>=3.3.0", "scipy>=1.14", "numpy>=2.0", "kaggle_environments>=1.18.0")
-	.add_local_dir(local_path=str(Path(__file__).parent.parent), remote_path="/app/src", copy=True)
+	.add_local_dir(local_path=str(Path(__file__).parent.parent.parent.parent), remote_path="/app/src", copy=True)
 )
 
 app = modal.App("orbit-wars-cma-tuner", image=tuner_image)
 
 
-@app.function(image=tuner_image, cpu=4.0, memory=4096, timeout=120 * MINUTES)
+@app.function(image=tuner_image, cpu=13.0, memory=4096, timeout=420 * MINUTES)
 def evaluate_fitness(
 		cfg_dict, candidate_id, generation, sanity_n_per_opponent, fitness_n_per_opponent, sanity_threshold,
 		archive_opponents=None
@@ -322,7 +361,13 @@ def main(
 	best_fitness_so_far, best_cfg_dict_so_far, best_per_opp_so_far = float("-inf"), None, None
 	accumulated_cost = 0.0
 	gen_log_path = out_dir / "generations.jsonl"
-	archive = []
+	# Pre-seed the rolling archive with bestv6_overhaul (CMA-ES sweep
+	# 2026-05-09T19-33-22Z, fitness +0.3651). FIFO-evicts around gen 9 once
+	# self-coevolution archive fills under default ARCHIVE_MAX_SIZE=3 /
+	# ARCHIVE_UPDATE_INTERVAL=3. See `src/orbit_wars/opponents/bestv6_overhaul.py`
+	# for caveats — config has corner-of-space values and is unproven on ladder.
+	from orbit_wars.opponents.bestv6_overhaul import BEST_V6_OVERHAUL
+	archive = [{"name": "bestv6_overhaul", "cfg_dict": asdict(BEST_V6_OVERHAUL), "added_gen": -1}]
 	robust_best_archive_size, robust_best_fitness, robust_best_cfg, robust_best_per_opp = -1, float("-inf"), None, None
 
 	for gen in range(gens):

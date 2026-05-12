@@ -1,12 +1,9 @@
-"""ParamSpace table for CMA-ES tuning of HeuristicConfig.
-
-Massively expanded domain boundaries across all numeric parameters so the
-CMA-ES optimizer can organically explore wild tactics without hitting false ceilings.
-"""
-
+"""ParamSpace table for CMA-ES tuning of HeuristicConfig. Massively expanded domain boundaries across all numeric parameters so the CMA-ES optimizer can organically explore wild tactics without hitting false ceilings."""
 from __future__ import annotations
+
 from dataclasses import fields
 import numpy as np
+
 from orbit_wars.heuristic.heuristic_overhaul.config import HeuristicConfig
 
 __all__ = ["PARAM_SPACE", "NUMERIC_FIELDS", "INT_DIM_INDICES", "encode", "decode", "validate_param_space"]
@@ -84,17 +81,37 @@ PARAM_SPACE: dict[str, tuple[float, float, bool]] = {
 NUMERIC_FIELDS: list[str] = list(PARAM_SPACE.keys())
 INT_DIM_INDICES: list[int] = [i for i, name in enumerate(NUMERIC_FIELDS) if PARAM_SPACE[name][2]]
 
+
 def validate_param_space() -> None:
-    numeric_field_names = {f.name for f in fields(HeuristicConfig) if f.type in (int, float, "int", "float")}
-    missing = numeric_field_names - set(PARAM_SPACE)
-    if missing: raise ValueError(f"Missing bounds for: {sorted(missing)}")
+	numeric_field_names = {f.name for f in fields(HeuristicConfig) if f.type in (int, float, "int", "float")}
+	missing = numeric_field_names - set(PARAM_SPACE)
+	if missing: raise ValueError(f"Missing bounds for: {sorted(missing)}")
+
 
 def encode(cfg: HeuristicConfig) -> np.ndarray:
-    return np.array([float(getattr(cfg, name)) for name in NUMERIC_FIELDS], dtype=np.float64)
+	return np.array([float(getattr(cfg, name)) for name in NUMERIC_FIELDS], dtype=np.float64)
+
 
 def decode(x: np.ndarray) -> HeuristicConfig:
-    kwargs: dict[str, int | float] = {}
-    for i, name in enumerate(NUMERIC_FIELDS):
-        _, _, is_int = PARAM_SPACE[name]
-        kwargs[name] = int(round(float(x[i]))) if is_int else float(x[i])
-    return HeuristicConfig(**kwargs)
+	kwargs: dict[str, int | float] = {}
+	for i, name in enumerate(NUMERIC_FIELDS):
+		_, _, is_int = PARAM_SPACE[name]
+		kwargs[name] = int(round(float(x[i]))) if is_int else float(x[i])
+
+	# INTELLIGENCE BOOST: Force chronologically valid endgame and opening phases!
+	# If CMA-ES generates mathematically inverted bounds, reorder them instantly
+	# before execution rather than evaluating a mathematically broken param set.
+	phases = sorted([
+		kwargs["very_late_remaining_turns"],
+		kwargs["total_war_remaining_turns"],
+		kwargs["late_remaining_turns"]
+		])
+	kwargs["very_late_remaining_turns"] = phases[0]
+	kwargs["total_war_remaining_turns"] = phases[1]
+	kwargs["late_remaining_turns"] = phases[2]
+
+	openings = sorted([kwargs["early_turn_limit"], kwargs["opening_turn_limit"]])
+	kwargs["early_turn_limit"] = openings[0]
+	kwargs["opening_turn_limit"] = openings[1]
+
+	return HeuristicConfig(**kwargs)

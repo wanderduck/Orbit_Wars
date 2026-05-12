@@ -594,3 +594,4 @@ def _build_comet_paths(obs: ObservationView) -> tuple[dict[int, list[tuple[float
             paths[int(pid)] = [tuple(map(float, pt)) for pt in path]
             indices[int(pid)] = path_index
     return paths, indices
+

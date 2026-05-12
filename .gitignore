@@ -37,3 +37,12 @@ notebooks/episodes_*.json
 
 #data
 data/
+
+#models
+models/
+
+
+
+
+models/
+/models

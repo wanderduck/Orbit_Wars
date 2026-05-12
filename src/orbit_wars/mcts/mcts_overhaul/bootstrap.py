@@ -47,8 +47,8 @@ app = modal.App("orbit-wars-nn-bootstrapper", image=tuner_image)
 
 
 def get_closest_bucket(fraction: float, buckets: tuple[float, ...]) -> int:
-    """Find the index of the closest bucket."""
-    return int(np.argmin(np.abs(np.array(buckets) - fraction)))
+    """Find the index of the closest bucket via pure python loops."""
+    return min(range(len(buckets)), key=lambda i: abs(buckets[i] - fraction))
 
 
 @app.function(

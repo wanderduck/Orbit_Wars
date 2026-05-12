@@ -8,7 +8,7 @@ from orbit_wars.sim.simulator import Simulator
 from orbit_wars.mcts.serialize import serialize_picks_to_env_actions
 from .node import Node
 from .features import extract_features_sim
-from .dense_token import decode_dense_token, NUM_TOKENS
+from .dense_token_adjusted import decode_dense_token, NUM_TOKENS
 
 def softmax(x):
     y = x - np.max(x)

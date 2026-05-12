@@ -29,15 +29,15 @@ if TORCH_AVAILABLE:
         Expanded to a 2048-dimensional deep funnel architecture utilizing GELU
         activations to prevent dead neurons and stabilize deep gradient flows.
         """
-        def __init__(self, state_dim: int, num_tokens: int, hidden_dim: int = 2048, dropout_p: float = 0.1):
+        def __init__(self, state_dim: int, num_tokens: int, hidden_dim: int = 1024, dropout_p: float = 0.1):
             super().__init__()
             self.state_dim = state_dim
             self.num_tokens = num_tokens
 
-            # Dropout layer to prevent massive 2048-dim layers from overfitting
+            # Dropout layer to prevent massive 1024-dim layers from overfitting
             self.dropout = nn.Dropout(p=dropout_p)
 
-            # --- Block 1: 2048 dimensions ---
+            # --- Block 1: 1024 dimensions ---
             self.fc1 = nn.Linear(state_dim, hidden_dim, bias=False)
             self.bn1 = nn.BatchNorm1d(hidden_dim)
             self.fc2 = nn.Linear(hidden_dim, hidden_dim, bias=False)
@@ -45,7 +45,7 @@ if TORCH_AVAILABLE:
             self.fc3 = nn.Linear(hidden_dim, hidden_dim, bias=False)
             self.bn3 = nn.BatchNorm1d(hidden_dim)
 
-            # --- Block 2: 1024 dimensions ---
+            # --- Block 2: 512 dimensions ---
             dim_b2 = hidden_dim // 2
             self.fc4 = nn.Linear(hidden_dim, dim_b2, bias=False)
             self.bn4 = nn.BatchNorm1d(dim_b2)
@@ -54,7 +54,7 @@ if TORCH_AVAILABLE:
             self.fc6 = nn.Linear(dim_b2, dim_b2, bias=False)
             self.bn6 = nn.BatchNorm1d(dim_b2)
 
-            # --- Block 3: 512 dimensions ---
+            # --- Block 3: 256 dimensions ---
             dim_b3 = dim_b2 // 2
             self.fc7 = nn.Linear(dim_b2, dim_b3, bias=False)
             self.bn7 = nn.BatchNorm1d(dim_b3)
@@ -64,15 +64,15 @@ if TORCH_AVAILABLE:
             self.bn9 = nn.BatchNorm1d(dim_b3)
 
             # --- Value Head ---
-            self.val_fc = nn.Linear(dim_b3, 128, bias=False)
-            self.val_bn = nn.BatchNorm1d(128)
-            self.val_out = nn.Linear(128, 1)
+            self.val_fc = nn.Linear(dim_b3, 64, bias=False)
+            self.val_bn = nn.BatchNorm1d(64)
+            self.val_out = nn.Linear(64, 1)
 
             # --- Policy Head ---
-            # Widened to 1024 to support the massive num_tokens classification output
-            self.pol_fc = nn.Linear(dim_b3, 1024, bias=False)
-            self.pol_bn = nn.BatchNorm1d(1024)
-            self.pol_out = nn.Linear(1024, num_tokens)
+            # Widened to 512 to support the massive num_tokens classification output
+            self.pol_fc = nn.Linear(dim_b3, 512, bias=False)
+            self.pol_bn = nn.BatchNorm1d(512)
+            self.pol_out = nn.Linear(512, num_tokens)
 
             # Apply Initialization
             self._initialize_weights()

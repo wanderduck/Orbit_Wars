@@ -43,6 +43,8 @@ dependencies = [
     "modal>=1.4.2",
     "cma>=3.3.0",
     "onnxruntime>=1.26.0",
+    "onnxscript>=0.7.0",
+    "onnx>=1.21.0",
 ]
 
 [project.optional-dependencies]
