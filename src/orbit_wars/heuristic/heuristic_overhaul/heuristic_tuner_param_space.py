@@ -1,4 +1,8 @@
-"""ParamSpace table for CMA-ES tuning of HeuristicConfig. Massively expanded domain boundaries across all numeric parameters so the CMA-ES optimizer can organically explore wild tactics without hitting false ceilings."""
+"""ParamSpace table for CMA-ES tuning of HeuristicConfig.
+
+Massively expanded domain boundaries across all numeric parameters so the CMA-ES
+optimizer can organically explore wild tactics without hitting false ceilings."""
+
 from __future__ import annotations
 
 from dataclasses import fields
@@ -76,6 +80,24 @@ PARAM_SPACE: dict[str, tuple[float, float, bool]] = {
     "finishing_prod_ratio": (0.5, 5.0, False),
     "behind_attack_margin_penalty": (0.0, 0.8, False),
     "ahead_attack_margin_bonus": (0.0, 0.8, False),
+
+    # ----- Exposed Planet Detection -----
+    "exposed_planet_min_outbound": (5, 50, True),
+    "exposed_planet_min_fleet_ships": (1, 20, True),
+    "exposed_planet_value_mult": (1.0, 3.0, False),
+    "exposed_planet_margin_relief": (0, 10, True),
+
+    # ----- Spatial & Distance Thresholds -----
+    "defense_frontier_distance": (5.0, 50.0, False),
+    "safe_contested_neutral_margin": (5.0, 50.0, False),
+    "backline_safe_distance": (15.0, 80.0, False),
+    "redistribute_min_dist_diff": (5.0, 50.0, False),
+    "redistribute_scale_factor": (5.0, 50.0, False),
+
+    # ----- Target Size Thresholds -----
+    "snipe_ships_threshold": (2, 40, True),
+    "swarm_min_fleet_size": (15, 100, True),
+    "swarm_overkill_ratio": (0.1, 0.8, False),
 }
 
 NUMERIC_FIELDS: list[str] = list(PARAM_SPACE.keys())
@@ -83,35 +105,36 @@ INT_DIM_INDICES: list[int] = [i for i, name in enumerate(NUMERIC_FIELDS) if PARA
 
 
 def validate_param_space() -> None:
-	numeric_field_names = {f.name for f in fields(HeuristicConfig) if f.type in (int, float, "int", "float")}
-	missing = numeric_field_names - set(PARAM_SPACE)
-	if missing: raise ValueError(f"Missing bounds for: {sorted(missing)}")
+    numeric_field_names = {f.name for f in fields(HeuristicConfig) if f.type in (int, float, "int", "float")}
+    missing = numeric_field_names - set(PARAM_SPACE)
+    if missing:
+        raise ValueError(f"Missing bounds for: {sorted(missing)}")
 
 
 def encode(cfg: HeuristicConfig) -> np.ndarray:
-	return np.array([float(getattr(cfg, name)) for name in NUMERIC_FIELDS], dtype=np.float64)
+    return np.array([float(getattr(cfg, name)) for name in NUMERIC_FIELDS], dtype=np.float64)
 
 
 def decode(x: np.ndarray) -> HeuristicConfig:
-	kwargs: dict[str, int | float] = {}
-	for i, name in enumerate(NUMERIC_FIELDS):
-		_, _, is_int = PARAM_SPACE[name]
-		kwargs[name] = int(round(float(x[i]))) if is_int else float(x[i])
+    kwargs: dict[str, int | float] = {}
+    for i, name in enumerate(NUMERIC_FIELDS):
+        _, _, is_int = PARAM_SPACE[name]
+        kwargs[name] = int(round(float(x[i]))) if is_int else float(x[i])
 
-	# INTELLIGENCE BOOST: Force chronologically valid endgame and opening phases!
-	# If CMA-ES generates mathematically inverted bounds, reorder them instantly
-	# before execution rather than evaluating a mathematically broken param set.
-	phases = sorted([
-		kwargs["very_late_remaining_turns"],
-		kwargs["total_war_remaining_turns"],
-		kwargs["late_remaining_turns"]
-		])
-	kwargs["very_late_remaining_turns"] = phases[0]
-	kwargs["total_war_remaining_turns"] = phases[1]
-	kwargs["late_remaining_turns"] = phases[2]
+    # INTELLIGENCE BOOST: Force chronologically valid endgame and opening phases!
+    # If CMA-ES generates mathematically inverted bounds, reorder them instantly
+    # before execution rather than evaluating a mathematically broken param set.
+    phases = sorted([
+        kwargs["very_late_remaining_turns"],
+        kwargs["total_war_remaining_turns"],
+        kwargs["late_remaining_turns"]
+    ])
+    kwargs["very_late_remaining_turns"] = phases[0]
+    kwargs["total_war_remaining_turns"] = phases[1]
+    kwargs["late_remaining_turns"] = phases[2]
 
-	openings = sorted([kwargs["early_turn_limit"], kwargs["opening_turn_limit"]])
-	kwargs["early_turn_limit"] = openings[0]
-	kwargs["opening_turn_limit"] = openings[1]
+    openings = sorted([kwargs["early_turn_limit"], kwargs["opening_turn_limit"]])
+    kwargs["early_turn_limit"] = openings[0]
+    kwargs["opening_turn_limit"] = openings[1]
 
-	return HeuristicConfig(**kwargs)
+    return HeuristicConfig(**kwargs)

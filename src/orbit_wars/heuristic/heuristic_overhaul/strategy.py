@@ -1,4 +1,5 @@
-"""Top-level v2 heuristic agent — Advanced Utility-Driven Mission Planner."""
+"""Top-level v2 heuristic agent   Advanced Utility-Driven Mission Planner."""
+
 from __future__ import annotations
 
 import sys
@@ -12,7 +13,6 @@ from scipy.optimize import linear_sum_assignment
 from orbit_wars.geometry import dist, is_static_planet, safe_angle_and_distance
 from orbit_wars.state import ObservationView, Planet
 from orbit_wars.world import WorldModel, aim_with_prediction, estimate_fleet_eta, path_collision_predicted
-
 from .config import HeuristicConfig
 
 __all__ = ["LaunchDecision", "Threat", "agent", "decide_with_decisions"]
@@ -68,6 +68,7 @@ def _get_domination(view: ObservationView, remaining_steps: int) -> float:
         if p.owner not in (-1, view.player):
             val = p.ships + getattr(p, 'production', 0) * horizon
             enemy_ships_by_id[p.owner] = enemy_ships_by_id.get(p.owner, 0) + val
+
     for f in view.fleets:
         if f.owner not in (-1, view.player):
             enemy_ships_by_id[f.owner] = enemy_ships_by_id.get(f.owner, 0) + f.ships
@@ -75,6 +76,25 @@ def _get_domination(view: ObservationView, remaining_steps: int) -> float:
     max_enemy_ships = max(enemy_ships_by_id.values()) if enemy_ships_by_id else 0
     total = max(1.0, float(my_ships + max_enemy_ships))
     return float((my_ships - max_enemy_ships) / total)
+
+
+def get_exposed_planets(view: ObservationView, cfg: HeuristicConfig) -> set[int]:
+    """Identifies enemy planets that have exhausted their garrison by launching a major outbound fleet."""
+    exposed = set()
+    enemy_planets = [p for p in view.planets if p.owner not in (-1, view.player)]
+    for planet in enemy_planets:
+        outbound = sum(
+            int(f.ships)
+            for f in view.fleets
+            if (
+                f.owner == planet.owner
+                and getattr(f, "from_planet_id", -1) == planet.id
+                and f.ships >= cfg.exposed_planet_min_fleet_ships
+            )
+        )
+        if outbound >= cfg.exposed_planet_min_outbound and outbound >= planet.ships:
+            exposed.add(planet.id)
+    return exposed
 
 
 def find_threats(view: ObservationView, world: WorldModel, cfg: HeuristicConfig) -> list[Threat]:
@@ -86,7 +106,6 @@ def find_threats(view: ObservationView, world: WorldModel, cfg: HeuristicConfig)
     for planet in view.planets:
         timeline = world.base_timeline.get(planet.id)
         if not timeline: continue
-
         we_own = (planet.owner == view.player)
         for t in range(1, timeline.horizon + 1):
             if timeline.owner_at[t] == view.player:
@@ -100,13 +119,12 @@ def find_threats(view: ObservationView, world: WorldModel, cfg: HeuristicConfig)
 def _score_candidate(
     src: Planet, target: Planet, ships: int, eta: int, mission: str,
     view: ObservationView, cfg: HeuristicConfig, remaining_steps: int, domination: float,
-    min_my_dist: float, min_enemy_dist: float
+    min_my_dist: float, min_enemy_dist: float, exposed_planets: set[int]
 ) -> float:
     is_static = is_static_planet(target.x, target.y, target.radius)
     is_comet = view.is_comet(target.id)
     is_neutral = target.owner == -1
     is_hostile = not is_neutral and target.owner != view.player
-
     turn = view.step
     is_early = turn <= cfg.early_turn_limit
     is_opening = turn <= cfg.opening_turn_limit
@@ -118,17 +136,17 @@ def _score_candidate(
     if mission in ("reinforce", "redistribute"):
         mult *= cfg.reinforce_value_mult
         cost_weight = cfg.reinforce_cost_turn_weight
-
-        # INTELLIGENCE BOOST: Previously missing multiplier applied
-        if min_enemy_dist <= min_my_dist + 15:
+        # INTELLIGENCE BOOST: Parameterized multiplier applied
+        if min_enemy_dist <= min_my_dist + cfg.defense_frontier_distance:
             mult *= cfg.defense_frontier_score_mult
     else:
-        # INTELLIGENCE BOOST: Previously missing multiplier applied
-        if getattr(target, 'ships', 0) <= 10:
+        # INTELLIGENCE BOOST: Parameterized multiplier applied
+        if getattr(target, 'ships', 0) <= cfg.snipe_ships_threshold:
             mult *= cfg.snipe_score_mult
 
         if is_neutral:
-            cost_weight = cfg.snipe_cost_turn_weight if target.ships <= 10 else cfg.attack_cost_turn_weight
+            cost_weight = cfg.snipe_cost_turn_weight if getattr(target, 'ships', 0) <= cfg.snipe_ships_threshold else cfg.attack_cost_turn_weight
+
             if is_static:
                 mult *= cfg.static_neutral_value_mult
                 if is_early:
@@ -140,13 +158,13 @@ def _score_candidate(
                     mult *= cfg.rotating_opening_value_mult
 
             # Evaluated securely with O(1) distances
-            if min_my_dist < min_enemy_dist - 15:
+            if min_my_dist < min_enemy_dist - cfg.safe_contested_neutral_margin:
                 mult *= cfg.safe_neutral_value_mult
-            elif min_enemy_dist < min_my_dist + 15:
+            elif min_enemy_dist < min_my_dist + cfg.safe_contested_neutral_margin:
                 mult *= cfg.contested_neutral_value_mult
 
         elif is_hostile:
-            cost_weight = cfg.snipe_cost_turn_weight if target.ships <= 10 else cfg.attack_cost_turn_weight
+            cost_weight = cfg.snipe_cost_turn_weight if getattr(target, 'ships', 0) <= cfg.snipe_ships_threshold else cfg.attack_cost_turn_weight
             mult *= cfg.hostile_target_value_mult
             if is_static:
                 mult *= cfg.static_hostile_value_mult
@@ -156,7 +174,8 @@ def _score_candidate(
 
             if getattr(target, 'ships', 0) < cfg.weak_enemy_threshold:
                 base_val += cfg.elimination_bonus
-            if target.ships == 0:
+
+            if getattr(target, 'ships', 0) == 0:
                 mult *= cfg.crash_exploit_score_mult
 
     if domination < cfg.behind_domination:
@@ -166,11 +185,17 @@ def _score_candidate(
 
     if remaining_steps <= cfg.late_remaining_turns:
         base_val += cfg.late_immediate_ship_value * getattr(target, 'ships', 0.0)
+
     if domination > cfg.finishing_domination and is_total_war:
         mult *= cfg.finishing_prod_ratio
+
     if is_comet:
         mult *= cfg.comet_value_mult
-    if ships > 50 and getattr(target, 'ships', 0) < ships * 0.3:
+
+    if is_hostile and target.id in exposed_planets:
+        mult *= cfg.exposed_planet_value_mult
+
+    if ships > cfg.swarm_min_fleet_size and getattr(target, 'ships', 0) < ships * cfg.swarm_overkill_ratio:
         mult *= cfg.swarm_score_mult
 
     cost = float(ships) + float(eta) * cost_weight + 1.0
@@ -180,17 +205,16 @@ def _score_candidate(
 def _try_launch(
     src: Planet, target: Planet, view: ObservationView, world: WorldModel,
     cfg: HeuristicConfig, available: int, domination: float,
-    need_cache: dict[tuple[int, int], int | None]
+    need_cache: dict[tuple[int, int], int | None], exposed_planets: set[int]
 ) -> tuple[float, int, int] | None:
     target_is_moving = (not is_static_planet(target.x, target.y, target.radius)) or view.is_comet(target.id)
-    ships_send = max(int(getattr(target, 'ships', 0)) + 1, cfg.min_launch)
 
+    ships_send = max(int(getattr(target, 'ships', 0)) + 1, cfg.min_launch)
     if ships_send > available: return None
 
     # INTELLIGENCE BOOST: Convergence loop to fix the Fleet Speed / ETA Catch-22 bug
     angle, eta = 0.0, 0
     converged = False
-
     for _ in range(3):
         if target_is_moving:
             intercept = aim_with_prediction(
@@ -223,9 +247,12 @@ def _try_launch(
         if domination < cfg.behind_domination: margin = max(0, margin - 1)
         elif domination > cfg.ahead_domination: margin += 1
 
-        required_ships = max(ships_send, int(need) + margin)
-        if required_ships > available: return None
+        if target.owner not in (-1, view.player) and target.id in exposed_planets:
+            margin = max(0, margin - cfg.exposed_planet_margin_relief)
 
+        required_ships = max(ships_send, int(need) + margin)
+
+        if required_ships > available: return None
         if required_ships == ships_send:
             converged = True
             break
@@ -268,6 +295,7 @@ def _plan_missions_unified(
         target_min_my_dist[tgt.id] = min(my_dists) if my_dists else 1e9
         target_min_enemy_dist[tgt.id] = min(en_dists) if en_dists else 1e9
 
+    exposed_planets = get_exposed_planets(view, cfg)
     need_cache: dict[tuple[int, int], int | None] = {}
     defense_cache: dict[tuple[int, int], int | None] = {}
 
@@ -279,6 +307,7 @@ def _plan_missions_unified(
 
         for src in view.my_planets:
             if src.id == target.id: continue
+
             available = int(src.ships) - (0 if is_total_war else cfg.defense_buffer)
             cap = int(int(src.ships) * cfg.reinforce_max_source_fraction)
             usable = min(available, cap)
@@ -293,17 +322,18 @@ def _plan_missions_unified(
                     target_id=target.id, hold_until=hold_until, arrival_turn=probe[1], defender=view.player,
                 )
             need = defense_cache[d_key]
-            if not need or need <= 0: continue
 
+            if not need or need <= 0: continue
             ships_send = max(cfg.min_launch, int(need) + cfg.reinforce_safety_margin)
             ships_send = min(ships_send, available, cap)
+
             if ships_send < cfg.min_launch: continue
 
             probe2 = estimate_fleet_eta(src, (target.x, target.y), target.radius, ships_send)
             if not probe2 or probe2[1] > threat.fall_turn or probe2[1] > remaining_steps: continue
             angle, eta = probe2
 
-            score = _score_candidate(src, target, ships_send, eta, "reinforce", view, cfg, remaining_steps, domination, target_min_my_dist.get(target.id, 0), target_min_enemy_dist.get(target.id, 0))
+            score = _score_candidate(src, target, ships_send, eta, "reinforce", view, cfg, remaining_steps, domination, target_min_my_dist.get(target.id, 0), target_min_enemy_dist.get(target.id, 0), exposed_planets)
             if score > 0:
                 if not path_collision_predicted(
                     src=src, target=target, angle=angle, ships=ships_send, eta=eta,
@@ -313,8 +343,8 @@ def _plan_missions_unified(
 
     # 2. Build Macro Backline Redistribution Candidates ("Dead Backline" Fix)
     for src in view.my_planets:
-        # Only mobilize planets far from the frontline
-        if target_min_enemy_dist.get(src.id, 0) < 35: continue
+        # Only mobilize planets far from the frontline using configurable boundaries
+        if target_min_enemy_dist.get(src.id, 0) < cfg.backline_safe_distance: continue
 
         available = int(src.ships) - cfg.home_reserve
         if available < cfg.min_launch * 2: continue
@@ -323,7 +353,7 @@ def _plan_missions_unified(
             if src.id == target.id: continue
 
             dist_diff = target_min_enemy_dist.get(src.id, 0) - target_min_enemy_dist.get(target.id, 0)
-            if dist_diff < 20: continue
+            if dist_diff < cfg.redistribute_min_dist_diff: continue
 
             ships_send = min(int(available * 0.8), available)
             if ships_send < cfg.min_launch: continue
@@ -334,8 +364,8 @@ def _plan_missions_unified(
 
             if eta > remaining_steps or eta > cfg.route_search_horizon: continue
 
-            score = _score_candidate(src, target, ships_send, eta, "redistribute", view, cfg, remaining_steps, domination, target_min_my_dist.get(target.id, 0), target_min_enemy_dist.get(target.id, 0))
-            score *= (dist_diff / 15.0)
+            score = _score_candidate(src, target, ships_send, eta, "redistribute", view, cfg, remaining_steps, domination, target_min_my_dist.get(target.id, 0), target_min_enemy_dist.get(target.id, 0), exposed_planets)
+            score *= (dist_diff / cfg.redistribute_scale_factor)
 
             if score > 0:
                 if not path_collision_predicted(
@@ -350,11 +380,11 @@ def _plan_missions_unified(
         if available < cfg.min_launch: continue
 
         for target in target_planets:
-            result = _try_launch(src, target, view, world, cfg, available, domination, need_cache)
+            result = _try_launch(src, target, view, world, cfg, available, domination, need_cache, exposed_planets)
             if not result: continue
             angle, ships, eta = result
 
-            score = _score_candidate(src, target, ships, eta, "capture", view, cfg, remaining_steps, domination, target_min_my_dist.get(target.id, 0), target_min_enemy_dist.get(target.id, 0))
+            score = _score_candidate(src, target, ships, eta, "capture", view, cfg, remaining_steps, domination, target_min_my_dist.get(target.id, 0), target_min_enemy_dist.get(target.id, 0), exposed_planets)
             if score > 0:
                 candidates.append((src, target, angle, ships, eta, score, "capture"))
 
@@ -378,6 +408,7 @@ def _plan_missions_unified(
 
             src_ids = sorted({c[0].id for c in valid_candidates})
             tgt_keys = sorted({(c[1].id, c[6]) for c in valid_candidates})
+
             src_idx = {sid: i for i, sid in enumerate(src_ids)}
             tgt_idx = {tkey: j for j, tkey in enumerate(tgt_keys)}
 
@@ -392,8 +423,8 @@ def _plan_missions_unified(
                     detail[(i, j)] = c
 
             row_ind, col_ind = linear_sum_assignment(score_matrix, maximize=True)
-
             assignments_made = 0
+
             for i, j in zip(row_ind, col_ind, strict=False):
                 if score_matrix[i, j] > 0.0:
                     src, target, angle, ships, eta, score, mission = detail[(i, j)]
@@ -405,7 +436,6 @@ def _plan_missions_unified(
                         target_is_static=is_static_planet(target.x, target.y, target.radius),
                         target_is_comet=view.is_comet(target.id), mission=mission,
                     ))
-
                     available_ships[src.id] -= int(ships)
                     assigned_tgts.add((target.id, mission))
                     assignments_made += 1
@@ -418,6 +448,7 @@ def _plan_missions_unified(
         for c in candidates:
             src, target, angle, ships, eta, score, mission = c
             if (target.id, mission) in assigned_tgts: continue
+
             if ships <= available_ships.get(src.id, 0):
                 moves.append([src.id, float(angle), int(ships)])
                 decisions.append(LaunchDecision(
@@ -437,9 +468,12 @@ def _decide_with_decisions(obs: Any, cfg: HeuristicConfig) -> tuple[list[list[fl
     view = ObservationView.from_raw(obs)
     if not view.my_planets:
         return [], []
+
     world = WorldModel.from_observation(view, horizon=cfg.sim_horizon)
     remaining_steps = max(0, EPISODE_STEPS - view.step)
     domination = _get_domination(view, remaining_steps)
+
     target_planets = [p for p in view.planets if p.owner != view.player]
     threats = find_threats(view, world, cfg)
+
     return _plan_missions_unified(view, world, cfg, target_planets, threats, remaining_steps, domination)

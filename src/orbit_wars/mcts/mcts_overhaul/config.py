@@ -22,6 +22,6 @@ class MCTSOverhaulConfig:
     max_iteration_ms: float = 69.0
 
     ship_fraction_buckets: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8, 1.0)
-    tokens_per_decision: int = 3
+    tokens_per_decision: int = 4
     max_launches_per_turn: int = 5
     commit_position: str = "last"

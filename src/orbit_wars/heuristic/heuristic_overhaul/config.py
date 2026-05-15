@@ -1,4 +1,4 @@
-"""HeuristicConfig — tunable weights and thresholds for the v2 heuristic agent."""
+"""HeuristicConfig   tunable weights and thresholds for the v2 heuristic agent."""
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -81,6 +81,24 @@ class HeuristicConfig:
     finishing_prod_ratio: float = 1.25
     behind_attack_margin_penalty: float = 0.05
     ahead_attack_margin_bonus: float = 0.08
+
+    # ----- Exposed Planet Detection -----
+    exposed_planet_min_outbound: int = 15
+    exposed_planet_min_fleet_ships: int = 5
+    exposed_planet_value_mult: float = 1.30
+    exposed_planet_margin_relief: int = 2
+
+    # ----- Spatial & Distance Thresholds -----
+    defense_frontier_distance: float = 15.0
+    safe_contested_neutral_margin: float = 15.0
+    backline_safe_distance: float = 35.0
+    redistribute_min_dist_diff: float = 20.0
+    redistribute_scale_factor: float = 15.0
+
+    # ----- Target Size Thresholds -----
+    snipe_ships_threshold: int = 10
+    swarm_min_fleet_size: int = 50
+    swarm_overkill_ratio: float = 0.3
 
     @classmethod
     def default(cls) -> HeuristicConfig:
