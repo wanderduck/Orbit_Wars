@@ -49,6 +49,24 @@ class StreamingBatchedIterableDataset(IterableDataset):
     the whole 130GB+ arrays into RAM. Maintains a sliding shuffle buffer.
     """
     def __init__(self, file_paths: list[Path], batch_size: int, chunks_per_buffer: int = 5):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         self.files = file_paths
         self.batch_size = batch_size
         self.chunk_size = batch_size * chunks_per_buffer
@@ -155,7 +173,7 @@ def main(args):
         raise FileNotFoundError(f"No dataset found in {data_dir}. Check paths.")
 
     print(f"Found {len(files)} dataset files.")
-    print("Initiating Streaming Zip Loader. System RAM usage will remain safely under 5GB regardless of dataset size!")
+    print("Initiating Streaming Zip Loader.")
 
     dataset = StreamingBatchedIterableDataset(files, batch_size=args.batch_size, chunks_per_buffer=args.chunks_per_buffer)
 
@@ -177,8 +195,8 @@ def main(args):
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # --- WARMUP + COSINE ANNEALING SCHEDULER ---
-    # Warms up to args.lr over the first 2 epochs to prevent gradient explosion in deep layers
-    warmup_epochs = min(2, args.epochs - 1) if args.epochs > 1 else 0
+    # Warms up to args.lr over the first 3 epochs to prevent gradient explosion in deep layers
+    warmup_epochs = min(3, args.epochs - 1) if args.epochs > 1 else 0
     if warmup_epochs > 0:
         warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs)
         cosine_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(args.epochs - warmup_epochs))
@@ -296,25 +314,25 @@ def main(args):
         model.eval() # MUST be in eval mode for ONNX export (disables Dropout / freezes BatchNorm)
 
         # Wrapping in torch.no_grad() is best practice for ONNX export memory footprint
-		with torch.no_grad():
-			dummy_input = torch.randn(1, STATE_DIM, device=device)
-			# FIXED: Removed dynamic_axes, upgraded opset_version to 18
-			torch.onnx.export(
-				model,
-				dummy_input,
-				str(onnx_path),
-				export_params=True,
-				opset_version=18,
-				do_constant_folding=True,
-				input_names=['input'],
-				output_names=['policy', 'value']
-				)
+        with torch.no_grad():
+            dummy_input = torch.randn(1, STATE_DIM, device=device)
+            # FIXED: Removed dynamic_axes, upgraded opset_version to 18
+            torch.onnx.export(
+                model,
+                dummy_input,
+                str(onnx_path),
+                export_params=True,
+                opset_version=18,
+                do_constant_folding=True,
+                input_names=['input'],
+                output_names=['policy', 'value']
+                )
 
         model.train() # CRITICAL: Switch back to train mode for the next epoch loop!
         print(f"--> Successfully updated {pt_path.name} and {onnx_path.name}\n")
         # ==========================================================
 
-    print("Training Complete!")
+    print('Training Complete!')
 
 
 if __name__ == "__main__":

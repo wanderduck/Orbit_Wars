@@ -8,7 +8,7 @@ from __future__ import annotations
 from orbit_wars.mcts.token import LaunchToken
 
 MAX_PLANETS = 60
-NUM_BUCKETS = 4
+NUM_BUCKETS = 5
 NUM_TOKENS = 1 + (MAX_PLANETS * MAX_PLANETS * NUM_BUCKETS)
 
 def encode_dense_token(token: LaunchToken) -> int:
